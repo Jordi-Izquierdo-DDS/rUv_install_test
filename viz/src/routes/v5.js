@@ -512,24 +512,33 @@ export function registerIntel(app) {
       const intel = readJson(INTEL) || {};
       const stat = fileStat(INTEL);
 
-      const byExtension = Object.entries(intel.patterns || {}).map(([key, agents]) => {
-        const entries = Object.entries(agents).sort((a, b) => b[1] - a[1]);
+      const byExtension = Object.entries(intel.patterns || {}).map(([key, value]) => {
+        // Shape is `{ext: {agent: qValue}}`. Defensive against legacy string shape too.
+        if (typeof value === 'string') {
+          return { key, topAgent: value, topQ: 0, totalQ: 0, agents: [{ name: value, q: 0 }] };
+        }
+        const entries = Object.entries(value || {}).sort((a, b) => b[1] - a[1]);
         const [topAgent, topQ] = entries[0] || [null, 0];
-        const totalQ = entries.reduce((a, e) => a + e[1], 0);
+        const totalQ = entries.reduce((a, e) => a + Number(e[1] || 0), 0);
         return {
           key,
           topAgent,
-          topQ,
+          topQ: Number(topQ) || 0,
           totalQ,
-          agents: entries.slice(0, 5).map(([name, q]) => ({ name, q })),
+          agents: entries.slice(0, 5).map(([name, q]) => ({ name, q: Number(q) || 0 })),
         };
       }).sort((a, b) => b.totalQ - a.totalQ);
 
-      const byDirectory = Object.entries(intel.dirPatterns || {}).map(([dir, agents]) => {
-        const entries = Object.entries(agents).sort((a, b) => b[1] - a[1]);
+      // dirPatterns shape differs from patterns: `dir -> agentName` (string) OR `dir -> {agent: qValue}` (object, legacy).
+      // Normalize both to the table row shape so the UI doesn't need to special-case.
+      const byDirectory = Object.entries(intel.dirPatterns || {}).map(([dir, value]) => {
+        if (typeof value === 'string') {
+          return { dir, topAgent: value, topQ: 0, totalQ: 0, agents: [{ name: value, q: 0 }] };
+        }
+        const entries = Object.entries(value || {}).sort((a, b) => b[1] - a[1]);
         const [topAgent, topQ] = entries[0] || [null, 0];
-        const totalQ = entries.reduce((a, e) => a + e[1], 0);
-        return { dir, topAgent, topQ, totalQ, agents: entries.slice(0, 5).map(([name, q]) => ({ name, q })) };
+        const totalQ = entries.reduce((a, e) => a + Number(e[1] || 0), 0);
+        return { dir, topAgent, topQ: Number(topQ) || 0, totalQ, agents: entries.slice(0, 5).map(([name, q]) => ({ name, q: Number(q) || 0 })) };
       }).sort((a, b) => b.totalQ - a.totalQ);
 
       res.json({

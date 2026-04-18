@@ -12,6 +12,10 @@ const PORT = process.env.PORT || 3100;
 const app = express();
 app.use(express.json());
 
+// Inline favicon (purple circle) — prevents browser 404 spam on any page load
+const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="#8b5cf6"/></svg>`;
+app.get('/favicon.ico', (req, res) => res.type('image/svg+xml').send(FAVICON_SVG));
+
 // Serve v5 dashboard at root (standalone — no brain-chat override needed)
 app.get('/', (req, res) => {
   const htmlPath = join(__dirname, '..', 'public', 'v5.html');

@@ -485,24 +485,32 @@ function renderRbank(rb) {
 }
 
 function renderIntel(intel) {
-  const maxExt = intel.byExtension[0]?.totalQ || 1;
-  const maxDir = intel.byDirectory[0]?.totalQ || 1;
+  // Numeric guard — dirPatterns in intelligence.json can be a bare agent name (string)
+  // rather than {agent: qValue}, so topQ/totalQ may be 0 or non-numeric.
+  const numQ = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+  const maxExt = numQ(intel.byExtension[0]?.totalQ) || 1;
+  const maxDir = numQ(intel.byDirectory[0]?.totalQ) || 1;
 
-  document.getElementById('intel-ext').innerHTML = intel.byExtension.slice(0, 30).map(r => `
+  document.getElementById('intel-ext').innerHTML = intel.byExtension.slice(0, 30).map(r => {
+    const total = numQ(r.totalQ);
+    return `
     <div class="bar-row">
       <span class="name">${r.key}</span>
-      <span class="bar"><span class="bar-fill" style="width:${(r.totalQ/maxExt*100).toFixed(1)}%"></span></span>
-      <span class="val">${r.topAgent} · ${r.totalQ.toFixed(1)}</span>
-    </div>
-  `).join('');
+      <span class="bar"><span class="bar-fill" style="width:${(total/maxExt*100).toFixed(1)}%"></span></span>
+      <span class="val">${r.topAgent ?? '—'} · ${total.toFixed(1)}</span>
+    </div>`;
+  }).join('');
 
-  document.getElementById('intel-dir').innerHTML = intel.byDirectory.slice(0, 30).map(r => `
+  document.getElementById('intel-dir').innerHTML = intel.byDirectory.slice(0, 30).map(r => {
+    const total = numQ(r.totalQ);
+    const pct = total > 0 ? (total/maxDir*100).toFixed(1) : 0;
+    return `
     <div class="bar-row">
       <span class="name" title="${r.dir}">${r.dir}</span>
-      <span class="bar"><span class="bar-fill" style="width:${(r.totalQ/maxDir*100).toFixed(1)}%"></span></span>
-      <span class="val">${r.topAgent} · ${r.totalQ.toFixed(1)}</span>
-    </div>
-  `).join('');
+      <span class="bar"><span class="bar-fill" style="width:${pct}%"></span></span>
+      <span class="val">${r.topAgent ?? '—'}${total > 0 ? ' · ' + total.toFixed(1) : ''}</span>
+    </div>`;
+  }).join('');
 
   const pt = intel.pretrained || {};
   document.getElementById('intel-pretrain').innerHTML = `
