@@ -18,6 +18,7 @@ import { registerConfigRoutes } from './routes/config.js';
 import { registerActivityRoutes } from './routes/activity.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerMcpRoutes } from './routes/mcp.js';
+import { registerLegacyShims } from './routes/legacy-shims.js';
 
 export function registerRoutes(app) {
 
@@ -316,4 +317,8 @@ export function registerRoutes(app) {
 
   // v5 routes (cycle, services, degradation, sona, reasoningbank, patterns, trajectories, intel, events).
   registerV5Routes(app);
+
+  // Shims for the legacy v4 dashboard — return valid empty JSON instead of 404s
+  // so dashboard.js doesn't spam console with `.json()` parse errors.
+  registerLegacyShims(app);
 }
