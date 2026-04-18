@@ -1,52 +1,130 @@
 {
   "patterns": {
+    "edit:.json": {
+      "config-specialist": 15.300000000000015,
+      "test-engineer": 0.3
+    },
     "edit:.cjs": {
-      "coder": 0.3
+      "coder": 1.8
     },
     "edit:.mjs": {
       "coder": 0.6
     },
-    "edit:.json": {
-      "config-specialist": 1.8
-    },
-    "edit:.log": {
-      "coder": 0.6
-    },
-    "edit:.pid": {
-      "coder": 0.3
-    },
     "edit:unknown": {
-      "coder": 0.6
-    },
-    "edit:.db": {
-      "coder": 0.6
-    },
-    "edit:.db-shm": {
-      "coder": 0.3
-    },
-    "edit:.db-wal": {
-      "coder": 0.3
+      "coder": 1.5
     },
     "edit:.md": {
-      "documentation-specialist": 34.50000000000003
+      "documentation-specialist": 37.8
     },
     "edit:.sh": {
-      "coder": 3.2999999999999994
+      "coder": 4.199999999999999
     },
     "edit:.html": {
-      "frontend-developer": 1.8
+      "frontend-developer": 2.1
+    },
+    "edit:.py": {
+      "python-developer": 58.199999999999804
+    },
+    "edit:.yaml": {
+      "config-specialist": 3.899999999999999
+    },
+    "edit:.jinja": {
+      "coder": 1.8
+    },
+    "edit:.toml": {
+      "coder": 0.6
+    },
+    "edit:.lock": {
+      "coder": 0.3
     },
     "edit:.ts": {
-      "typescript-developer": 0.6
+      "typescript-developer": 174.6000000000009,
+      "test-engineer": 63.59999999999975
+    },
+    "edit:.tsx": {
+      "react-developer": 13.20000000000001,
+      "test-engineer": 0.3
+    },
+    "edit:.css": {
+      "frontend-developer": 0.3
     },
     "edit:.js": {
-      "javascript-developer": 0.6
+      "javascript-developer": 16.200000000000017
+    },
+    "edit:.test": {
+      "coder": 0.3
+    },
+    "edit:.c": {
+      "coder": 1.2
+    },
+    "edit:.h": {
+      "coder": 21.60000000000003
+    },
+    "edit:.cpp": {
+      "coder": 13.800000000000011
+    },
+    "edit:.cs": {
+      "coder": 40.199999999999974
+    },
+    "edit:.csproj": {
+      "coder": 5.099999999999999
+    },
+    "edit:.go": {
+      "go-developer": 25.20000000000004
+    },
+    "edit:.mod": {
+      "coder": 7.499999999999997
+    },
+    "edit:.java": {
+      "coder": 42.89999999999995
+    },
+    "edit:.kt": {
+      "coder": 36.30000000000001
+    },
+    "edit:.php": {
+      "coder": 35.40000000000002
+    },
+    "edit:.rb": {
+      "coder": 24.900000000000038
+    },
+    "edit:.rs": {
+      "rust-developer": 36.000000000000014
+    },
+    "edit:.proto": {
+      "coder": 0.3
+    },
+    "edit:.cbl": {
+      "coder": 1.2
+    },
+    "edit:.cpy": {
+      "coder": 0.6
+    },
+    "edit:.jcl": {
+      "coder": 0.3
+    },
+    "edit:.txt": {
+      "coder": 0.6
+    },
+    "edit:.hpp": {
+      "coder": 0.3
+    },
+    "edit:.dart": {
+      "coder": 7.1999999999999975
+    },
+    "edit:.swift": {
+      "coder": 13.50000000000001
+    },
+    "edit:.vue": {
+      "vue-developer": 0.8999999999999999
+    },
+    "edit:.gyp": {
+      "coder": 0.3
+    },
+    "edit:.cc": {
+      "coder": 0.3
     },
     "edit:.node": {
       "coder": 0.6
-    },
-    "edit:.rs": {
-      "rust-developer": 0.3
     },
     "edit:.patch": {
       "coder": 0.3
@@ -57,7 +135,7 @@
     {
       "content": "[README.md] # ruflo bootstrap v5  **v5 = v4 + self-learning loop closed + VerdictAnalyzer from Rust.**  Built from v4 baseline. Key change: the system demonstrably self-improves (6/10 → 9/10 routing accuracy cross-session). VerdictAnalyzer (ruvllm NAPI) provides root cause analysis for failures. Two vendor NAPI rebuilds ship the full Rust learning pipeline to JS.  ## Quick start  ```bash # Install into a target project bash scripts/bootstrap.sh --target /path/to/project  # Verify cd /path/to/project && bash",
       "type": "project",
-      "created": "2026-04-18T11:18:14.505Z",
+      "created": "2026-04-18T12:54:30.032Z",
       "embedding": [
         0.1950904715954776,
         0.004241097208597339,
@@ -128,7 +206,7 @@
     {
       "content": "[CLAUDE.md] # Claude Code Configuration — ruflo v4 bootstrap  > **Identity:** v4 is a **thin adapter** over published `@ruvector/*` + `@claude-flow/memory` npm packages. No Cargo path-deps, no patch chain, no sentinels. Every self-learning concern lives upstream; ruflo is the hook-layer glue. **Narrow exception (2026-04-15):** pre-built NAPI overlays under `vendor/` are permitted for empirically-justified NAPI-surface-gap closures (see ADR-002 amendment + ADR-005 §7).  ---  ## 🧭 Sprint state — READ THIS FI",
       "type": "project",
-      "created": "2026-04-18T11:18:14.508Z",
+      "created": "2026-04-18T12:54:30.034Z",
       "embedding": [
         0.10639545062779465,
         0.011399512567263714,
@@ -199,7 +277,7 @@
     {
       "content": "[package.json] {   \"name\": \"ruflo-bootstrap-v4\",   \"version\": \"4.0.0-alpha.1\",   \"private\": true,   \"description\": \"Ruflo v4 — thin glue over published @ruvector/* WASM/NAPI packages.\",   \"type\": \"module\",   \"scripts\": {     \"bootstrap\": \"bash scripts/bootstrap.sh\",     \"verify\": \"bash scripts/verify.sh\",     \"smoke\": \"bash tests/smoke/01-trajectory-to-pattern.sh\"   },   \"dependencies\": {     \"@claude-flow/memory\": \"^3.0.0-alpha.14\",     \"@ruvector/attention\": \"^0.1.32\",     \"@ruvector/core\": \"^0.1.31\",     \"@",
       "type": "project",
-      "created": "2026-04-18T11:18:14.508Z",
+      "created": "2026-04-18T12:54:30.034Z",
       "embedding": [
         0.23382459236581793,
         0,
@@ -270,7 +348,7 @@
     {
       "content": "[.claude/settings.json] {   \"$schema\": \"https://json.schemastore.org/claude-code-settings.json\",   \"_comment\": \"ruflo v5 hook config. All commands prefixed with ${CLAUDE_PROJECT_DIR:-.} so they resolve correctly when hooks fire from any CWD.\",   \"hooks\": {     \"SessionStart\": [       {         \"hooks\": [           { \"type\": \"command\", \"command\": \"node \\\"${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/hook-handler.cjs\\\"\" }         ]       }     ],     \"UserPromptSubmit\": [       {         \"hooks\": [           { \"type\": \"comman",
       "type": "project",
-      "created": "2026-04-18T11:18:14.509Z",
+      "created": "2026-04-18T12:54:30.035Z",
       "embedding": [
         0.0885208173745723,
         0.05532551085910769,
@@ -340,7 +418,28 @@
     }
   ],
   "dirPatterns": {
+    ".agentic-flow": "config-specialist",
+    ".claude-flow": "config-specialist",
+    ".claude": "coder",
     ".": "coder",
+    "_doc": "documentation-specialist",
+    "_memory": "documentation-specialist",
+    "doc": "documentation-specialist",
+    "eval": "coder",
+    "gitnexus-shared": "config-specialist",
+    "gitnexus-web": "coder",
+    "gitnexus": "coder",
+    "memory": "documentation-specialist",
+    "scripts": "coder",
+    "tests": "coder",
+    "vendor": "typescript-developer",
+    "./eval/tests": "test-engineer",
+    "./gitnexus/scripts": "devops-engineer",
+    "./gitnexus/src": "coder",
+    "./gitnexus/test": "test-engineer",
+    "./gitnexus-shared/src": "coder",
+    "./gitnexus-web/src": "coder",
+    "./gitnexus-web/test": "test-engineer",
     "./scripts": "devops-engineer",
     "./tests": "test-engineer"
   },
@@ -351,10 +450,10 @@
     "routingHistory": []
   },
   "pretrained": {
-    "date": "2026-04-18T11:18:14.547Z",
+    "date": "2026-04-18T12:54:30.062Z",
     "stats": {
-      "files": 158,
-      "patterns": 158,
+      "files": 2378,
+      "patterns": 2378,
       "memories": 4,
       "coedits": 0
     }
