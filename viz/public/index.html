@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='7' fill='%238b5cf6'/></svg>">
+  <title>IT095 — Three-Tier Learning Visualization</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/renderjson@1.4.0/renderjson.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.30.0/themes/prism-tomorrow.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.30.0/prism.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.30.0/components/prism-json.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.30.0/components/prism-yaml.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.30.0/components/prism-sql.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.30.0/components/prism-bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.30.0/components/prism-markdown.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.30.0/components/prism-javascript.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.30.0/components/prism-typescript.min.js"></script>
+  <style>
+    #cycle-log::-webkit-scrollbar { display: none; }
+    :root {
+      /* Node type colors */
+      --color-trigger: #f59e0b;
+      --color-script: #3b82f6;
+      --color-engine: #8b5cf6;
+      --color-store-db: #10b981;
+      --color-store-json: #14b8a6;
+      --color-config: #6b7280;
+      --color-model: #eab308;
+      --color-service: #06b6d4;
+
+      /* Overlay state colors */
+      --color-found: #22c55e;
+      --color-degraded: #eab308;
+      --color-missing: #ef4444;
+      --color-unexpected: #06b6d4;
+
+      /* Status */
+      --color-active: #22c55e;
+      --color-idle: #94a3b8;
+      --color-flowing: #a78bfa;
+
+      /* Base */
+      --bg: #0f172a;
+      --bg-panel: #1e293b;
+      --bg-hover: #334155;
+      --text: #e2e8f0;
+      --text-dim: #94a3b8;
+      --text-bright: #f8fafc;
+      --border: #334155;
+      --border-active: #475569;
+
+      /* Tier backgrounds */
+      --tier1-bg: rgba(59, 130, 246, 0.05);
+      --tier2-bg: rgba(139, 92, 246, 0.05);
+      --tier3-bg: rgba(20, 184, 166, 0.05);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'SF Mono', 'Fira Code', monospace; background: var(--bg); color: var(--text); overflow: hidden; height: 100vh; }
+
+    /* Header */
+    .header { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; border-bottom: 1px solid var(--border); background: var(--bg-panel); }
+    .header h1 { font-size: 14px; font-weight: 600; color: var(--text-bright); }
+    .header .stats { font-size: 12px; color: var(--text-dim); }
+
+    /* Tab bar */
+    .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); background: var(--bg-panel); }
+    .tab { padding: 8px 20px; font-size: 13px; color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; }
+    .tab:hover { color: var(--text); background: var(--bg-hover); }
+    .tab.active { color: var(--text-bright); border-bottom-color: var(--color-engine); }
+
+    /* Main content */
+    .content { height: calc(100vh - 80px); overflow: hidden; position: relative; }
+    .view { display: none; height: 100%; width: 100%; }
+    .view.active { display: flex; }
+
+    /* Graph view */
+    #graph-view { position: relative; }
+    #graph-svg { width: 100%; height: 100%; }
+
+    /* Side panel */
+    .side-panel { position: absolute; right: 0; top: 0; width: 380px; height: 100%; background: var(--bg-panel); border-left: 1px solid var(--border); overflow-y: auto; transform: translateX(100%); transition: transform 0.2s; z-index: 10; }
+    .side-panel.open { transform: translateX(0); }
+    .side-panel-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+    .side-panel-header h3 { font-size: 14px; }
+    .side-panel-close { cursor: pointer; color: var(--text-dim); font-size: 18px; }
+    .side-panel-body { padding: 16px; font-size: 12px; }
+    .side-panel-body .renderjson { font-size: 11px; line-height: 1.4; }
+    .side-panel-body .renderjson a { color: #60a5fa; text-decoration: none; }
+    .side-panel-body .renderjson .disclosure { color: #60a5fa; cursor: pointer; font-size: 10px; }
+    .side-panel-body .renderjson .string { color: #a5d6ff; }
+    .side-panel-body .renderjson .number { color: #f59e0b; }
+    .side-panel-body .renderjson .boolean { color: #c084fc; }
+    .side-panel-body .renderjson .key { color: #7dd3fc; }
+    .side-panel-body .renderjson .null { color: #6b7280; }
+    .side-panel-body pre[class*="language-"] { background: #0d1117; border-radius: 6px; padding: 10px; margin: 4px 0; font-size: 11px; max-height: 300px; overflow: auto; }
+    .side-panel-body code[class*="language-"] { font-size: 11px; }
+
+    /* Tooltip */
+    .tooltip { position: absolute; pointer-events: none; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; font-size: 11px; line-height: 1.6; z-index: 100; max-width: 320px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+    .tooltip .signal { display: inline-block; width: 12px; }
+    .tooltip .signal.ok { color: var(--color-found); }
+    .tooltip .signal.no { color: var(--color-missing); }
+
+    /* Data tables view */
+    #tables-view { flex-direction: column; }
+    .table-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); background: var(--bg); padding: 0 16px; }
+    .table-tab { padding: 6px 16px; font-size: 12px; color: var(--text-dim); cursor: pointer; border-bottom: 2px solid transparent; }
+    .table-tab:hover { color: var(--text); }
+    .table-tab.active { color: var(--text-bright); border-bottom-color: var(--color-store-db); }
+    .table-content { flex: 1; overflow-y: auto; padding: 16px; }
+
+    table.data { width: 100%; border-collapse: collapse; font-size: 12px; }
+    table.data th { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); color: var(--text-dim); font-weight: 500; position: sticky; top: 0; background: var(--bg); }
+    table.data td { padding: 6px 10px; border-bottom: 1px solid var(--border); }
+    table.data tr:hover td { background: var(--bg-hover); }
+    .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; }
+    .badge-green { background: rgba(34,197,94,0.15); color: var(--color-found); }
+    .badge-yellow { background: rgba(234,179,8,0.15); color: var(--color-degraded); }
+    .badge-red { background: rgba(239,68,68,0.15); color: var(--color-missing); }
+    .badge-cyan { background: rgba(6,182,212,0.15); color: var(--color-unexpected); }
+    .badge-purple { background: rgba(167,139,250,0.15); color: #a78bfa; }
+    .badge-blue { background: rgba(59,130,246,0.15); color: #3b82f6; }
+
+    /* Brain chat view */
+    #brain-view { flex-direction: column; padding: 16px; }
+    .brain-input { display: flex; gap: 8px; margin-bottom: 16px; }
+    .brain-input input { flex: 1; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-family: inherit; font-size: 13px; }
+    .brain-input button { padding: 8px 16px; background: var(--color-engine); border: none; border-radius: 4px; color: white; cursor: pointer; font-family: inherit; }
+    .brain-results { flex: 1; overflow-y: auto; }
+    .brain-result { padding: 12px; margin-bottom: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; }
+    .brain-result .score { color: var(--color-model); font-size: 11px; }
+
+    /* Summary bar */
+    .summary-bar { display: flex; gap: 16px; padding: 6px 16px; font-size: 11px; color: var(--text-dim); border-bottom: 1px solid var(--border); background: var(--bg); }
+    .summary-bar .tier { display: flex; align-items: center; gap: 4px; }
+    .tier-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .tier-dot.active { background: var(--color-active); }
+    .tier-dot.partial { background: var(--color-degraded); }
+    .tier-dot.inactive { background: var(--color-missing); }
+
+    /* Toolbar shared */
+    .toolbar-row { display: flex; gap: 4px; align-items: center; }
+    .toolbar-row-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); opacity: 0.5; width: 72px; text-align: right; padding-right: 5px; flex-shrink: 0; user-select: none; white-space: nowrap; }
+    .toolbar-row-sep { width: 1px; height: 16px; background: var(--border); margin: 0 2px; opacity: 0.5; }
+
+    /* Left toolbar — diagnostics panel (top-left), same style as right panels */
+    .toolbar-viz { position: absolute; top: 8px; left: 8px; display: flex; flex-direction: column; gap: 3px; z-index: 5; align-items: flex-start; max-width: 520px; }
+    .toolbar-viz-row-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); opacity: 0.5; width: 48px; flex-shrink: 0; user-select: none; }
+    .toolbar-viz button { padding: 3px 10px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 5px; color: var(--text-dim); cursor: pointer; font-family: inherit; font-size: 10px; transition: all 0.2s; line-height: 1.4; white-space: nowrap; }
+    .toolbar-viz button:hover { border-color: var(--border-active); color: var(--text); background: var(--bg-hover); }
+    .toolbar-viz button.active { background: var(--color-engine); color: #fff; border-color: var(--color-engine); }
+    .toolbar-viz button.dirty { border-color: var(--color-engine); color: var(--color-engine); }
+
+    /* All toolbar panels share left-align inside .toolbar-viz */
+    .toolbar-viz button[disabled] { opacity: 0.5; cursor: wait; }
+
+    /* Health status bar — inside collapsible */
+    .health-bar { padding: 3px 8px !important; font-size: 10px; color: #94a3b8; gap: 6px !important; }
+    .health-bar #health-status { flex: 1; font-family: inherit; }
+    .health-refresh-btn { padding: 1px 6px !important; font-size: 10px !important; opacity: 0.6; }
+    .health-refresh-btn:hover { opacity: 1 !important; }
+
+    /* Pipeline buttons — numbered steps, flow order */
+    .pipeline-row { padding: 3px 6px !important; }
+    .pipeline-btn { font-weight: 500; }
+    .pipeline-btn.step-1 { border-color: #06b6d4; color: #06b6d4; }
+    .pipeline-btn.step-1:hover { background: rgba(6,182,212,0.15); }
+    .pipeline-btn.step-2 { border-color: #8b5cf6; color: #8b5cf6; }
+    .pipeline-btn.step-2:hover { background: rgba(139,92,246,0.15); }
+    .pipeline-btn.step-3 { border-color: #10b981; color: #10b981; }
+    .pipeline-btn.step-3:hover { background: rgba(16,185,129,0.15); }
+    .pipeline-btn.step-4 { border-color: #f59e0b; color: #f59e0b; }
+    .pipeline-btn.step-4:hover { background: rgba(245,158,11,0.15); }
+    .pipeline-btn.step-5 { border-color: #ec4899; color: #ec4899; }
+    .pipeline-btn.step-5:hover { background: rgba(236,72,153,0.15); }
+
+    /* Layer promote buttons — pink gradient aligned with step-5 Promote */
+    .layer-promote-btn { font-weight: 500; }
+    .layer-promote-btn:hover { background: rgba(236,72,153,0.15); }
+    .lp-1 { border-color: #f9a8d4; color: #f9a8d4; }
+    .lp-2 { border-color: #f48fb1; color: #f48fb1; }
+    .lp-3 { border-color: #f472b6; color: #f472b6; }
+    .lp-4 { border-color: #ec4899; color: #ec4899; }
+    .lp-5 { border-color: #e43a8d; color: #e43a8d; }
+    .lp-6 { border-color: #db2777; color: #db2777; }
+    .lp-7 { border-color: #be185d; color: #be185d; }
+
+    /* Full Cycle — heavier */
+    .full-btn { background: rgba(139,92,246,0.25); border-color: #7c3aed; color: #c4b5fd; font-weight: 600; }
+    .full-btn:hover { background: rgba(139,92,246,0.4); color: #ede9fe; }
+
+    /* Collapsible panels — compact when folded, full when open */
+    .toolbar-collapse { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(8px); transition: width 0.15s ease; }
+    .toolbar-collapse:not([open]) { width: auto; }
+    .toolbar-collapse[open] { width: 100%; overflow: visible; }
+    .toolbar-collapse-label { font-size: 10px; color: var(--text-dim); cursor: pointer; padding: 3px 8px; user-select: none; display: flex; align-items: center; gap: 4px; min-height: 22px; line-height: 16px; white-space: nowrap; }
+    .toolbar-collapse-label:hover { color: var(--text); background: rgba(51, 65, 85, 0.6); }
+    .toolbar-collapse-label::marker, .toolbar-collapse-label::-webkit-details-marker { display: none; }
+    .toolbar-collapse-label .fold-arrow { font-size: 8px; transition: transform 0.15s; display: inline-block; }
+    .toolbar-collapse[open] .fold-arrow { transform: rotate(90deg); }
+    .collapse-hint { font-size: 8px; opacity: 0.5; font-style: italic; }
+    .toolbar-collapse:not([open]) .collapse-hint { display: none; }
+    .toolbar-collapse .toolbar-row { padding: 2px 6px; justify-content: flex-start; flex-wrap: wrap; }
+
+    /* Diagnostic buttons — amber/neutral */
+    .diag-btn { border-color: #d97706; color: #fbbf24; }
+    .diag-btn:hover { background: rgba(217,119,6,0.15); color: #fde68a; }
+
+    /* Worker buttons — muted */
+    .wrk-btn { border-color: #64748b; color: #94a3b8; }
+    .wrk-btn:hover { background: rgba(100,116,139,0.15); color: var(--text); }
+    .phase-label { font-size: 8px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); opacity: 0.4; padding: 0 3px; user-select: none; align-self: center; }
+
+    /* MCP tools section in side panel */
+    .mcp-tools-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid #333; }
+    .mcp-tools-section h4 { font-size: 12px; font-weight: 600; margin-bottom: 8px; color: #fbbf24; }
+    .mcp-group-header { cursor: pointer; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; color: var(--text-dim); user-select: none; display: flex; align-items: center; gap: 4px; }
+    .mcp-group-header:hover { background: var(--bg-hover); color: var(--text); }
+    .mcp-group-header .arrow { font-size: 9px; transition: transform 0.15s; }
+    .mcp-group-header.open .arrow { transform: rotate(90deg); }
+    .mcp-group-body { display: none; padding: 4px 0 4px 8px; }
+    .mcp-group-body.open { display: flex; flex-wrap: wrap; gap: 4px; }
+    .mcp-tool-btn { padding: 3px 8px; font-size: 10px; border: 1px solid #d97706; color: #fbbf24; background: transparent; border-radius: 4px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+    .mcp-tool-btn:hover { background: rgba(217,119,6,0.15); color: #fde68a; }
+    .mcp-tool-btn[disabled] { opacity: 0.5; cursor: wait; }
+    .mcp-output { margin-top: 8px; max-height: 250px; overflow: auto; font-size: 11px; }
+    .mcp-output pre.code { max-height: 200px; overflow: auto; font-size: 11px; }
+
+    /* Node shapes in SVG */
+    .node-group { cursor: pointer; }
+    .edge-path { fill: none; }
+    .edge-label { pointer-events: none; }
+
+    /* Preformatted in side panel */
+    pre.code { background: var(--bg); padding: 8px; border-radius: 4px; overflow-x: auto; font-size: 11px; max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
+
+    /* Learning Cycle ring animations */
+    @keyframes cycle-pulse {
+      0%   { stroke-opacity: 0.2; stroke-width: 2; }
+      20%  { stroke-opacity: 1;   stroke-width: 5; }
+      60%  { stroke-opacity: 0.8; stroke-width: 4; }
+      100% { stroke-opacity: 0.3; stroke-width: 2; }
+    }
+    @keyframes cycle-glow {
+      0% { filter: drop-shadow(0 0 2px currentColor); }
+      50% { filter: drop-shadow(0 0 8px currentColor); }
+      100% { filter: drop-shadow(0 0 2px currentColor); }
+    }
+    .cycle-edge-pulse { animation: cycle-pulse 3s ease-in-out; }
+    .cycle-feedback-glow { animation: cycle-glow 2s ease-in-out infinite; }
+    .cycle-node:hover { filter: brightness(1.3); cursor: pointer; }
+    #cycle-svg text { font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace; }
+    /* Ring layer dot hover */
+    .ring-layer-dot:hover circle { filter: drop-shadow(0 0 4px currentColor); }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Three-Tier Learning Visualization</h1>
+  </div>
+  <div class="summary-bar" id="summary-bar"></div>
+  <div class="tabs">
+    <div class="tab active" data-view="graph-view">Learning Graph</div>
+    <div class="tab" data-view="cycle-view">Learning Cycle</div>
+    <div class="tab" data-view="tables-view">Data Tables</div>
+    <div class="tab" data-view="rewards-view">Rewards</div>
+    <div class="tab" data-view="trajectory-view">Trajectories</div>
+    <div class="tab" data-view="controllers-view">Controllers</div>
+    <div class="tab" data-view="brain-view">Brain Chat</div>
+  </div>
+  <div class="content">
+    <div id="graph-view" class="view active" style="position:relative">
+      <svg id="graph-svg"></svg>
+      <!-- LEFT: Diagnostics panel (top-left, foldable) -->
+      <div class="toolbar-viz">
+        <details class="toolbar-collapse">
+          <summary class="toolbar-collapse-label"><span class="fold-arrow">&#9656;</span> &#9776; View Tools</summary>
+          <div class="toolbar-row">
+            <span class="toolbar-viz-row-label">View</span>
+            <button id="filter-btn" title="Toggle filter panel">&#9776; Filter</button>
+            <button id="legend-btn" title="Toggle legend">&#9432; Legend</button>
+            <button id="boxes-btn" class="active" title="Toggle subgraph boxes">&#9633; Boxes</button>
+            <button id="save-layout-btn" title="Save node positions">&#128190; Save</button>
+            <button id="reset-layout-btn" title="Reset to default positions">&#8634; Reset</button>
+          </div>
+          <div class="toolbar-row">
+            <span class="toolbar-viz-row-label">Pulse</span>
+            <button id="pulse-active-btn" class="pulse-test-btn" title="Pulse all active edges">&#9679; Active</button>
+            <button id="pulse-idle-btn" class="pulse-test-btn" title="Pulse all idle edges">&#9675; Idle</button>
+            <button id="pulse-broken-btn" class="pulse-test-btn" title="Pulse all broken/pending edges">&#10007; Broken</button>
+            <button id="pulse-all-btn" class="pulse-test-btn" title="Pulse ALL edges">&#9733; All</button>
+          </div>
+          <div class="toolbar-row">
+            <span class="toolbar-viz-row-label">Scope</span>
+            <button id="scope-btn" title="Toggle pulse scope: this project vs all projects">&#9675; This Project</button>
+            <button id="rescan-btn" title="Rescan for new/removed nodes">&#8635; Rescan</button>
+          </div>
+        </details>
+
+        <!-- Pipeline -->
+        <details class="toolbar-collapse" id="pipeline-panel">
+          <summary class="toolbar-collapse-label"><span class="fold-arrow">&#9656;</span> &#9654; Pipeline <span class="collapse-hint">(5-step learning)</span></summary>
+          <div class="toolbar-row">
+            <span class="phase-label">learn</span>
+            <button id="lrn-pretrain-btn" class="pipeline-btn step-1" title="Seed: Scans .claude/helpers/ + src/ files via AST to seed Q-table routing patterns. MCP: hooks_pretrain. ~5-10s.">&#9312; Seed</button>
+            <button id="lrn-sona-btn" class="pipeline-btn step-2" title="Learn: Runs SONA trajectory optimizer — promotes step rewards into learned patterns via EMA. MCP: hooks_intelligence_learn. ~2s.">&#9313; Learn</button>
+            <button id="lrn-ewc-btn" class="pipeline-btn step-3" title="Protect: EWC++ consolidation — computes Fisher information matrix to prevent catastrophic forgetting during updates. MCP: agentdb_consolidate. ~3s.">&#9314; Protect</button>
+          </div>
+          <div class="toolbar-row">
+            <span class="phase-label">store</span>
+            <button id="lrn-intel-btn" class="pipeline-btn step-4" title="Consolidate: T1 graph feedback + intelligence.cjs consolidate(). Runs locally (no MCP), fast (<200ms). Merges pending insights into graph state.">&#9315; Consolidate</button>
+            <button id="lrn-promote-btn" class="pipeline-btn step-5" title="Promote: Runs 7-layer bridge pipeline — promotes patterns from short-term to long-term across all memory tiers. MCP: agentdb_consolidate. ~5s.">&#9316; Promote</button>
+          </div>
+          <div class="toolbar-row">
+            <span class="phase-label">all</span>
+            <button id="lrn-full-btn" class="full-btn" title="Full Cycle: Runs all 5 steps (Seed + Learn + Protect + Consolidate + Promote) then all 7 bridge layers. MCP-first with bridge fallback. ~15-30s.">&#9889; Full Cycle</button>
+          </div>
+        </details>
+
+        <!-- 7-Layer Promote (was top-right) -->
+        <details class="toolbar-collapse" id="layer-panel">
+          <summary class="toolbar-collapse-label"><span class="fold-arrow">&#9656;</span> &#8679; Promote <span class="collapse-hint">(7-layer pipeline)</span></summary>
+          <div class="toolbar-row">
+            <span class="phase-label">store</span>
+            <button id="layer-L1-btn"  class="layer-promote-btn lp-1" title="L1 Pattern: Threshold gate — filters raw trajectory steps by minimum learned reward, promotes qualifying patterns to patterns.db short_term_patterns.">L1 Pat</button>
+            <button id="layer-L2b-btn" class="layer-promote-btn lp-2" title="L2 Dedup: SQL consolidator — deduplicates memory_entries, prunes stale entries, merges near-identical patterns by cosine similarity.">L2b Dup</button>
+          </div>
+          <div class="toolbar-row">
+            <span class="phase-label">tier</span>
+            <button id="layer-L3-btn"  class="layer-promote-btn lp-3" title="L3 Memory: Promotes entries across 3 tiers (working > episodic > semantic). Entries with high access count and confidence move up.">L3 Mem</button>
+            <button id="layer-L4-btn"  class="layer-promote-btn lp-4" title="L4 Consolidation: 6-step pipeline — merge duplicate patterns, prune stale entries, recompute confidence scores, update graph edges.">L4 Cons</button>
+          </div>
+          <div class="toolbar-row">
+            <span class="phase-label">deep</span>
+            <button id="layer-L5-btn"  class="layer-promote-btn lp-5" title="L5 Reasoning: Stores consolidated patterns into ReasoningBank reasoning_patterns table for cross-session retrieval and verdict judgment.">L5 Reas</button>
+            <button id="layer-L6-btn"  class="layer-promote-btn lp-6" title="L6 EWC++: Computes Fisher information matrix from recent experiences, applies elastic weight consolidation to prevent catastrophic forgetting.">L6 EWC</button>
+            <button id="layer-L7-btn"  class="layer-promote-btn lp-7" title="L7 Nightly: Causal discovery — runs GNN causal graph analysis, extracts reusable skills from successful trajectories into skills table.">L7 Nght</button>
+          </div>
+        </details>
+
+        <!-- Diagnostics MCP (was top-right) -->
+        <details class="toolbar-collapse">
+          <summary class="toolbar-collapse-label"><span class="fold-arrow">&#9656;</span> &#9878; Inspect <span class="collapse-hint">(read-only)</span></summary>
+          <div class="toolbar-row">
+            <span class="phase-label">status</span>
+            <button id="mcp-intel-btn" class="diag-btn" title="Live intelligence stats via hooks_intelligence_stats MCP — SONA metrics, pattern stats, MoE routing, trajectory counts.">&#129504; Intelligence</button>
+            <button id="mcp-memstats-btn" class="diag-btn" title="Read-only: Queries memory.db — HierarchicalMemory tiers (working/episodic/semantic), entry counts, confidence distribution.">&#128190; Memory</button>
+            <button id="mcp-metrics-btn" class="diag-btn" title="Read-only: Daemon health — PID status, pipeline ops count, T2 writes, consolidation cycles, worker stats from daemon-state.json.">&#128202; Metrics</button>
+            <button id="mcp-doctor-btn" class="diag-btn" title="Read-only via MCP: Runs hooks_doctor — checks ONNX model, HNSW index, settings.json hooks, MCP config, file integrity.">&#129658; Doctor</button>
+          </div>
+          <div class="toolbar-row">
+            <span class="phase-label">search</span>
+            <button id="mcp-recall-btn" class="diag-btn" title="Read-only via MCP: Semantic vector search across memory_entries. Enter a query to find similar stored patterns by cosine distance.">&#128269; Recall</button>
+            <button id="mcp-route-btn" class="diag-btn" title="Read-only via MCP: Tests the routing pipeline — shows which agent would be selected for a given task description, with confidence scores.">&#129517; Route</button>
+            <button id="mcp-ast-btn" class="diag-btn" title="Read-only via MCP: AST analysis of a file — function count, cyclomatic complexity, import graph, class hierarchy.">&#127795; AST</button>
+            <button id="mcp-cluster-btn" class="diag-btn" title="Read-only via MCP: Graph clustering — finds strongly connected components and community structure in the causal edge graph.">&#128279; Cluster</button>
+          </div>
+          <div class="toolbar-row">
+            <span class="phase-label">mcp</span>
+            <button id="mcp-learn-btn" class="diag-btn" title="MUTATION via MCP: Triggers hooks_intelligence_learn — processes pending trajectory steps into Q-table updates. Changes routing state.">&#9889; Force Learn</button>
+            <button id="mcp-sona-btn" class="diag-btn" title="MUTATION via MCP: Runs SONA optimizer + EWC consolidation together. Updates Q-table, Fisher matrix, and memory tiers.">&#129504; SONA+EWC</button>
+          </div>
+          <div class="toolbar-row">
+            <span class="phase-label">deep</span>
+            <button id="inspect-hm-btn" class="diag-btn" title="Read-only: HierarchicalMemory — shows entry distribution across working/episodic/semantic tiers with confidence histograms.">&#127968; HM Tiers</button>
+            <button id="inspect-patterns-btn" class="diag-btn" title="Read-only: patterns.db stats — short-term vs long-term pattern counts, top patterns by quality score, recent promotions.">&#128202; Patterns</button>
+            <button id="inspect-ewc-btn" class="diag-btn" title="Read-only: EWC Fisher matrix — shows ewc-fisher.json diagonal values, parameter count, last consolidation timestamp.">&#9883; EWC Fisher</button>
+            <button id="inspect-skills-btn" class="diag-btn" title="Read-only: Skills extracted by L7 NightlyLearner — reusable code patterns with domains, quality scores, usage counts.">&#127942; Skills</button>
+          </div>
+        </details>
+
+        <!-- CLI Tools (was top-right) -->
+        <details class="toolbar-collapse">
+          <summary class="toolbar-collapse-label"><span class="fold-arrow">&#9656;</span> &#9659; CLI Tools <span class="collapse-hint">(on-demand)</span></summary>
+          <div class="toolbar-row">
+            <span class="phase-label">scan</span>
+            <button id="wrk-map-btn" class="wrk-btn" title="Map: AST-scans all .claude/helpers/ + src/ files. Returns function counts, cyclomatic complexity, import chains. Top 30 files, ~10s.">&#128506; Map</button>
+            <span class="toolbar-row-sep"></span>
+            <span class="phase-label">quality</span>
+            <button id="wrk-audit-btn" class="wrk-btn" title="Audit: Scans for hardcoded secrets, eval() usage, command injection patterns. Checks .env, permissions, hook verification. Local only.">&#128274; Audit</button>
+            <button id="wrk-testgaps-btn" class="wrk-btn" title="TestGaps: Compares src/ exports against tests/ files. Lists untested files with function counts and complexity scores.">&#128269; TestGaps</button>
+            <button id="wrk-optimize-btn" class="wrk-btn" title="Optimize: Analyzes Q-table quality (avg Q-value, distribution), pipeline health (T2 writes, consolidations), and gives recommendations.">&#9881; Optimize</button>
+          </div>
+          <div class="toolbar-row">
+            <span class="phase-label">learn</span>
+            <button id="wrk-preload-btn" class="wrk-btn" title="Preload: Checks warm state — reports if ONNX, bridge, intelligence, and learning-service are loaded and ready.">&#9889; Preload</button>
+            <button id="wrk-consolidate-btn" class="wrk-btn" title="Consolidate: Sends SIGUSR1 to hooks-daemon to trigger consolidation cycle. Reports before/after pipeline op counts.">&#128451; Consolidate</button>
+            <button id="wrk-deepdive-btn" class="wrk-btn" title="DeepDive: Full AST complexity analysis + import dependency graph for all helpers and src files. Shows high-complexity hotspots.">&#128300; DeepDive</button>
+            <button id="wrk-ultralearn-btn" class="wrk-btn" title="UltraLearn: Full learning report across all tiers — T1 auto-memory, T2 pipeline stats, T3 Q-table, L1 patterns.db, RL algorithms.">&#128218; UltraLearn</button>
+          </div>
+          <div class="toolbar-row">
+            <span class="phase-label">code</span>
+            <button id="wrk-document-btn" class="wrk-btn" title="Document: Scans all source files for JSDoc coverage. Lists undocumented files >50 lines sorted by size.">&#128196; Document</button>
+          </div>
+        </details>
+
+        <details class="toolbar-collapse" id="session-panel">
+          <summary class="toolbar-collapse-label"><span class="fold-arrow">&#9656;</span> &#128260; Session <span class="collapse-hint">(end)</span></summary>
+          <div class="toolbar-row">
+            <button id="session-end-btn" class="pipeline-btn step-5" title="Session End: Runs agentdb_session-end + agentdb_consolidate (all 7 layers) + hooks_intelligence_learn + T1 consolidation via MCP. ~10-20s.">&#9888; Session End</button>
+          </div>
+        </details>
+
+      </div>
+      <div class="side-panel" id="side-panel">
+        <div class="side-panel-header">
+          <h3 id="sp-title">Node Detail</h3>
+          <span class="side-panel-close" id="sp-close">&times;</span>
+        </div>
+        <div class="side-panel-body" id="sp-body"></div>
+      </div>
+    </div>
+    <div id="tables-view" class="view">
+      <div class="table-tabs">
+        <div class="table-tab active" data-table="patterns">Patterns</div>
+        <div class="table-tab" data-table="intelligence">Graph Intelligence</div>
+        <div class="table-tab" data-table="reasoningbank">ReasoningBank</div>
+        <div class="table-tab" data-table="session">Session Log</div>
+        <div class="table-tab" data-table="ruflo-intel">Ruflo Intel</div>
+        <div class="table-tab" data-table="agentdb">AgentDB</div>
+        <div class="table-tab" data-table="hnsw">HNSW</div>
+        <div class="table-tab" data-table="sona">SONA/EWC</div>
+        <div class="table-tab" data-table="auto-memory">Auto-Memory</div>
+        <div class="table-tab" data-table="insights">Insights Queue</div>
+        <div class="table-tab" data-table="mcp-health">MCP Health</div>
+        <div class="table-tab" data-table="worker-logs">Worker Logs</div>
+        <div class="table-tab" data-table="ewc-fisher">EWC Fisher</div>
+        <div class="table-tab" data-table="embeddings-config">Embeddings</div>
+        <div class="table-tab" data-table="learning-bridge">Learning Bridge</div>
+        <div class="table-tab" data-table="swarm-state">Swarm State</div>
+        <div class="table-tab" data-table="metrics-performance">Performance</div>
+        <div class="table-tab" data-table="metrics-learning">Learning</div>
+        <div class="table-tab" data-table="metrics-v3">V3 Progress</div>
+        <div class="table-tab" data-table="daemon-health">Daemon Health</div>
+        <div class="table-tab" data-table="security-audit">Security Audit</div>
+      </div>
+      <div class="table-content" id="table-content"></div>
+    </div>
+    <div id="rewards-view" class="view" style="flex-direction:column;padding:16px;overflow-y:auto">
+      <div id="rewards-content"></div>
+    </div>
+    <div id="trajectory-view" class="view" style="flex-direction:column;padding:16px;overflow-y:auto">
+      <div id="trajectory-content"></div>
+    </div>
+    <div id="controllers-view" class="view" style="flex-direction:column;padding:16px;overflow-y:auto">
+      <div id="controllers-content"></div>
+    </div>
+    <div id="brain-view" class="view">
+      <div class="brain-input">
+        <input type="text" id="brain-query" placeholder="Search the collective brain..." />
+        <button id="brain-search-btn">Search</button>
+      </div>
+      <div class="brain-results" id="brain-results"></div>
+    </div>
+    <div id="cycle-view" class="view" style="flex-direction:column;align-items:center;justify-content:center;padding:16px;overflow-y:auto;background:#080410">
+      <svg id="cycle-svg" width="700" height="700" viewBox="0 0 700 700" style="max-width:100%;max-height:calc(100vh - 280px)"></svg>
+      <div id="cycle-log" style="width:100%;max-width:600px;height:90px;overflow-y:scroll;scrollbar-width:none;position:relative;margin-top:8px;border:1px solid #1e293b;border-radius:6px;background:#0a0a14;padding:6px 10px;font-size:11px;font-family:'SF Mono','Cascadia Code','Fira Code',monospace;color:#94a3b8"></div>
+    </div>
+  </div>
+  <div class="tooltip" id="tooltip" style="display:none;"></div>
+  <script src="/dashboard.js" type="module"></script>
+</body>
+</html>

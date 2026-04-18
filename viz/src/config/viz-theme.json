@@ -1,0 +1,38 @@
+{
+  "edgeColors": {
+    "fires": "#f59e0b",
+    "calls": "#3b82f6",
+    "reads": "#c084fc",
+    "writes": "#60a5fa",
+    "uses": "#eab308",
+    "loads": "#a78bfa",
+    "configures": "#6b7280"
+  },
+  "edgeStatus": {
+    "broken": "#ef4444",
+    "deprecated": "#6b7280",
+    "pulse": "#22D3EE"
+  },
+  "edgeOpacity": {
+    "active": 0.4,
+    "idle": 0.2,
+    "broken": 0.93,
+    "deprecated": 0.15
+  },
+  "statusDot": {
+    "active": "#22c55e",
+    "idle": "#22D3EE",
+    "unhealthy": "#fbbf24",
+    "missing": "#ef4444",
+    "onDemand": "#a78bfa",
+    "phantom": "#6b7280",
+    "deprecated": "#4b5563"
+  },
+  "tierColors": {
+    "0": "#f97316",
+    "1": "#3b82f6",
+    "2": "#8b5cf6",
+    "3": "#14b8a6",
+    "9": "#6b7280"
+  }
+}

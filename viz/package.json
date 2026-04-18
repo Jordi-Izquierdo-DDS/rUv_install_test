@@ -1,0 +1,26 @@
+{
+  "name": "my-ruflo-project",
+  "version": "3.0.0",
+  "private": true,
+  "overrides": {
+    "@claude-flow/ruvector-upstream": "npm:ruvector@^0.2.22"
+  },
+  "dependencies": {
+    "ruflo": "^3.5.51",
+    "agentic-flow": "^3.0.0-alpha.1",
+    "agentdb": "^3.0.0-alpha.11",
+    "ruvector": "^0.2.22",
+    "@ruvector/sona": "^0.1.5",
+    "@ruvector/router": "^0.1.30",
+    "@ruvector/attention": "^0.1.32",
+    "@ruvector/learning-wasm": "^0.1.29",
+    "@ruvector/ruvllm": "^2.5.4",
+    "@claude-flow/cli": "^3.5.51",
+    "@claude-flow/memory": "^3.0.0-alpha.12",
+    "@claude-flow/embeddings": "^3.0.0-alpha.1",
+    "@claude-flow/guidance": "^3.0.0-alpha.1",
+    "@claude-flow/aidefence": "^3.0.2",
+    "@claude-flow/codex": "^3.0.0-alpha.8",
+    "better-sqlite3": "^11.0.0"
+  }
+}
