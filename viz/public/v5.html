@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ruflo v5 — Learning Cycle Live</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0a14;
+    --panel: #101027;
+    --border: #1e1e3a;
+    --text: #e2e8f0;
+    --dim: #94a3b8;
+    --accent: #8b5cf6;
+    --ok: #22c55e;
+    --warn: #eab308;
+    --err: #ef4444;
+    --pink: #ec4899;
+    --cyan: #06b6d4;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font: 12px 'SF Mono','Fira Code',monospace; background: var(--bg); color: var(--text); min-height: 100vh; padding: 16px; }
+  h1 { font-size: 15px; font-weight: 600; margin-bottom: 4px; color: #f8fafc; }
+  h2 { font-size: 12px; font-weight: 500; color: var(--dim); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.08em; }
+  .header-bar { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  .header-bar .meta { font-size: 11px; color: var(--dim); }
+  .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+  .panel + .panel { margin-top: 16px; }
+  .service-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 11px; border-bottom: 1px dashed var(--border); }
+  .service-row:last-child { border-bottom: none; }
+  .service-row .name { color: var(--text); }
+  .service-row .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .dot.ready { background: var(--ok); }
+  .dot.missing { background: var(--err); }
+  .chain-row { padding: 6px 8px; margin: 3px 0; border-radius: 4px; font-size: 11px; border-left: 3px solid transparent; }
+  .chain-row.active { background: rgba(139,92,246,0.12); border-left-color: var(--accent); }
+  .chain-row .level { color: var(--accent); font-weight: 600; margin-right: 8px; }
+  .chain-row .routing { color: var(--dim); font-size: 10px; display: block; margin-top: 2px; }
+  .metric { display: inline-block; padding: 3px 8px; background: rgba(139,92,246,0.15); color: #c4b5fd; border-radius: 4px; font-size: 10px; margin: 2px; }
+  .kv { display: flex; justify-content: space-between; padding: 3px 0; font-size: 11px; }
+  .kv .k { color: var(--dim); }
+  .kv .v { color: var(--text); font-weight: 600; }
+  .node-detail { font-size: 10px; color: var(--dim); font-style: italic; }
+  svg { width: 100%; height: 480px; }
+  .node-circle { stroke-width: 2; cursor: pointer; }
+  .node-circle.deferred { stroke-dasharray: 4,4; opacity: 0.4; }
+  .node-label { text-anchor: middle; font-size: 11px; font-weight: 600; fill: #f8fafc; pointer-events: none; }
+  .node-sublabel { text-anchor: middle; font-size: 9px; fill: var(--dim); pointer-events: none; }
+  .edge-line { stroke: #475569; stroke-width: 1.5; fill: none; }
+  .edge-line.active { stroke: var(--accent); stroke-width: 2; }
+  .edge-line.feedback { stroke: var(--pink); stroke-dasharray: 5,3; opacity: 0.6; }
+  .center-card { fill: rgba(139,92,246,0.08); stroke: var(--accent); stroke-width: 1; }
+  .log-line { font-size: 10px; color: var(--dim); padding: 2px 0; font-family: monospace; }
+  .log-line.err { color: var(--err); }
+  footer { margin-top: 24px; text-align: center; color: var(--dim); font-size: 10px; }
+  .refresh-btn { background: var(--accent); color: white; border: none; padding: 4px 10px; border-radius: 4px; font: inherit; cursor: pointer; font-size: 11px; }
+  .refresh-btn:hover { background: #7c3aed; }
+  a.tab-link { color: var(--cyan); text-decoration: none; font-size: 11px; margin-right: 12px; }
+  a.tab-link:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+  <div class="header-bar">
+    <div>
+      <h1>ruflo v5 — Learning Cycle Live</h1>
+      <div class="meta">
+        <a class="tab-link" href="/">&larr; v4 dashboard</a>
+        <span id="active-level">—</span> ·
+        Session <span id="session-id">—</span> ·
+        <span id="session-steps">—</span> steps ·
+        last refresh <span id="last-refresh">—</span>
+        <button class="refresh-btn" id="refresh" style="margin-left:12px">refresh</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div>
+      <div class="panel">
+        <h2>7-Node learning cycle</h2>
+        <svg id="cycle-svg" viewBox="0 0 700 480"></svg>
+      </div>
+      <div class="panel">
+        <h2>C4 memory recent events (daemon.log)</h2>
+        <div id="c4-log"></div>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <h2>Venn center metrics</h2>
+        <div id="center-metrics"></div>
+      </div>
+      <div class="panel">
+        <h2>Services (8-service stack)</h2>
+        <div id="services"></div>
+      </div>
+      <div class="panel">
+        <h2>Degradation chain</h2>
+        <div id="chain"></div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Endpoints: <code>/api/v5/cycle</code> · <code>/api/v5/services</code> · <code>/api/v5/degradation</code>
+  </footer>
+
+<script>
+const svg = d3.select('#cycle-svg');
+const CENTER = { x: 350, y: 240 };
+const RADIUS = 165;
+
+function polar(order, total) {
+  // position order=1..7 around circle, start at top (12 o'clock)
+  const angle = ((order - 1) / total) * 2 * Math.PI - Math.PI / 2;
+  return { x: CENTER.x + Math.cos(angle) * RADIUS, y: CENTER.y + Math.sin(angle) * RADIUS };
+}
+
+function qualityColor(q) {
+  if (q >= 0.9) return '#22c55e';
+  if (q >= 0.7) return '#a3e635';
+  if (q >= 0.5) return '#eab308';
+  if (q > 0)    return '#f97316';
+  return '#ef4444';
+}
+
+async function refresh() {
+  const [cycle, services, deg] = await Promise.all([
+    fetch('/api/v5/cycle').then(r => r.json()),
+    fetch('/api/v5/services').then(r => r.json()),
+    fetch('/api/v5/degradation').then(r => r.json()),
+  ]);
+
+  // Header
+  document.getElementById('active-level').textContent =
+    `L${deg.activeLevel} ${deg.activeLabel}`;
+  document.getElementById('active-level').style.color =
+    deg.activeLevel === 0 ? 'var(--ok)' : deg.activeLevel < 3 ? 'var(--warn)' : 'var(--err)';
+  document.getElementById('session-id').textContent = cycle.session.sessionId || 'none';
+  document.getElementById('session-steps').textContent = cycle.session.stepCount;
+  document.getElementById('last-refresh').textContent = new Date().toLocaleTimeString();
+
+  // Cycle SVG
+  svg.selectAll('*').remove();
+  const total = cycle.nodes.length;
+  const positions = cycle.nodes.map(n => ({ ...n, ...polar(n.order, total) }));
+
+  // Edges
+  for (const e of cycle.edges) {
+    const from = positions.find(p => p.id === e.from);
+    const to = positions.find(p => p.id === e.to);
+    if (!from || !to) continue;
+    const cls = 'edge-line' + (e.feedback ? ' feedback' : e.active ? ' active' : '');
+    svg.append('path')
+      .attr('d', `M${from.x},${from.y} A${RADIUS},${RADIUS} 0 0,${e.feedback ? 0 : 1} ${to.x},${to.y}`)
+      .attr('class', cls)
+      .attr('marker-end', 'url(#arrow)');
+  }
+
+  // Arrow marker
+  svg.append('defs').append('marker')
+    .attr('id', 'arrow').attr('viewBox', '0 -5 10 10')
+    .attr('refX', 12).attr('refY', 0)
+    .attr('markerWidth', 6).attr('markerHeight', 6).attr('orient', 'auto')
+    .append('path').attr('d', 'M0,-5L10,0L0,5').attr('fill', '#8b5cf6');
+
+  // Gap node (REFINE)
+  if (cycle.gap) {
+    const gapPos = polar(cycle.gap.order, total);
+    svg.append('circle')
+      .attr('cx', gapPos.x).attr('cy', gapPos.y).attr('r', 22)
+      .attr('class', 'node-circle deferred')
+      .attr('fill', '#1e1e3a').attr('stroke', '#64748b');
+    svg.append('text').attr('x', gapPos.x).attr('y', gapPos.y + 4)
+      .attr('class', 'node-label').style('opacity', 0.5).text(cycle.gap.id);
+  }
+
+  // Nodes
+  const g = svg.selectAll('g.node').data(positions).enter().append('g').attr('class', 'node');
+  g.append('circle')
+    .attr('cx', d => d.x).attr('cy', d => d.y)
+    .attr('r', d => 26 + Math.min(6, Math.log10((d.count || 0) + 1) * 4))
+    .attr('class', 'node-circle')
+    .attr('fill', d => qualityColor(d.quality))
+    .attr('stroke', '#f8fafc')
+    .append('title').text(d => `${d.id}\n${d.upstream}\n${d.detail}`);
+  g.append('text')
+    .attr('x', d => d.x).attr('y', d => d.y - 2)
+    .attr('class', 'node-label')
+    .text(d => d.id);
+  g.append('text')
+    .attr('x', d => d.x).attr('y', d => d.y + 10)
+    .attr('class', 'node-sublabel')
+    .text(d => `n=${d.count}`);
+
+  // Center card
+  svg.append('rect').attr('class', 'center-card')
+    .attr('x', CENTER.x - 80).attr('y', CENTER.y - 50)
+    .attr('width', 160).attr('height', 100).attr('rx', 8);
+  svg.append('text').attr('x', CENTER.x).attr('y', CENTER.y - 28)
+    .attr('class', 'node-label').text('v5 COMPOSITE');
+  svg.append('text').attr('x', CENTER.x).attr('y', CENTER.y - 12)
+    .attr('class', 'node-sublabel').text(`${cycle.center.coverage.phasesWired}  ${cycle.center.coverage.services} services`);
+  svg.append('text').attr('x', CENTER.x).attr('y', CENTER.y + 2)
+    .attr('class', 'node-sublabel').text(`Q=${cycle.center.quality.sonaAvgQuality} · conf=${cycle.center.quality.rbankAvgConfidence}`);
+  svg.append('text').attr('x', CENTER.x).attr('y', CENTER.y + 16)
+    .attr('class', 'node-sublabel').text(`C4=${cycle.center.persistence.c4Entries} · sona=${cycle.center.persistence.sonaPatterns} · rbank=${cycle.center.persistence.rbankPatterns}`);
+  svg.append('text').attr('x', CENTER.x).attr('y', CENTER.y + 30)
+    .attr('class', 'node-sublabel').text(`cross-session: ${cycle.center.persistence.crossSession}`);
+
+  // Center metrics side panel
+  const cm = document.getElementById('center-metrics');
+  cm.innerHTML = `
+    <div style="margin-bottom:10px"><strong style="color:#c4b5fd">Quality</strong></div>
+    <div class="kv"><span class="k">Embedding dim</span><span class="v">${cycle.center.quality.embeddingDim}</span></div>
+    <div class="kv"><span class="k">ONNX density</span><span class="v">${cycle.center.quality.onnxDensity}</span></div>
+    <div class="kv"><span class="k">Sona avg quality</span><span class="v">${cycle.center.quality.sonaAvgQuality}</span></div>
+    <div class="kv"><span class="k">rBank avg confidence</span><span class="v">${cycle.center.quality.rbankAvgConfidence}</span></div>
+    <div style="margin:10px 0 6px"><strong style="color:#c4b5fd">Coverage</strong></div>
+    <div class="kv"><span class="k">Phases wired</span><span class="v">${cycle.center.coverage.phasesWired}</span></div>
+    <div class="kv"><span class="k">Services</span><span class="v">${cycle.center.coverage.services}</span></div>
+    <div class="kv"><span class="k">Deferred</span><span class="v">${cycle.center.coverage.deferred.join(', ')}</span></div>
+    <div style="margin:10px 0 6px"><strong style="color:#c4b5fd">Persistence</strong></div>
+    <div class="kv"><span class="k">Layers</span><span class="v">${cycle.center.persistence.layers}</span></div>
+    <div class="kv"><span class="k">C4 entries</span><span class="v">${cycle.center.persistence.c4Entries}</span></div>
+    <div class="kv"><span class="k">C4 embeddings</span><span class="v">${cycle.center.persistence.c4Embeddings}</span></div>
+    <div class="kv"><span class="k">Sona patterns</span><span class="v">${cycle.center.persistence.sonaPatterns}</span></div>
+    <div class="kv"><span class="k">rBank patterns</span><span class="v">${cycle.center.persistence.rbankPatterns}</span></div>
+    <div class="kv"><span class="k">Intel routing patterns</span><span class="v">${cycle.center.persistence.intelPatterns}</span></div>
+    <div class="kv"><span class="k">Intel memories</span><span class="v">${cycle.center.persistence.intelMemories}</span></div>
+    <div class="kv"><span class="k">Cross-session</span><span class="v" style="color:${cycle.center.persistence.crossSession==='verified'?'var(--ok)':'var(--warn)'}">${cycle.center.persistence.crossSession}</span></div>
+  `;
+
+  // Services
+  const sv = document.getElementById('services');
+  sv.innerHTML = `
+    <div style="margin-bottom:8px;color:var(--dim);font-size:11px">
+      daemon: <span style="color:${services.daemon.alive?'var(--ok)':'var(--err)'}">${services.daemon.alive?'alive':'dead'}</span>
+      (PID ${services.daemon.pid || 'none'}) · ${services.readyCount}/${services.totalCount} ready
+    </div>
+    ${services.services.map(s => `
+      <div class="service-row">
+        <span class="name"><span class="dot ${s.ready?'ready':'missing'}"></span>${s.id}</span>
+        <span style="color:${s.ready?'var(--ok)':'var(--err)'}">${s.ready?'ready':'missing'}</span>
+      </div>
+    `).join('')}
+  `;
+
+  // Degradation chain
+  const ch = document.getElementById('chain');
+  ch.innerHTML = deg.chain.map(c => `
+    <div class="chain-row ${c.active?'active':''}">
+      <span class="level">L${c.level}</span> ${c.label}
+      <span class="routing">routing: ${c.routing} · works: ${c.works} · breaks: ${c.breaks}</span>
+    </div>
+  `).join('');
+
+  // C4 log
+  const log = document.getElementById('c4-log');
+  log.innerHTML = services.c4Events.map(e => `<div class="log-line">${e}</div>`).join('')
+    + (services.errors.length ? `<div style="margin-top:8px;color:var(--err);font-size:10px">${services.errors.length} error line(s)</div>` : '');
+}
+
+document.getElementById('refresh').addEventListener('click', refresh);
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
