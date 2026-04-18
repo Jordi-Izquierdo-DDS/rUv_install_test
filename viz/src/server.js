@@ -12,8 +12,15 @@ const PORT = process.env.PORT || 3100;
 const app = express();
 app.use(express.json());
 
-// Serve index.html with brain-chat override injected before </body>
+// Serve v5 dashboard at root (standalone — no brain-chat override needed)
 app.get('/', (req, res) => {
+  const htmlPath = join(__dirname, '..', 'public', 'v5.html');
+  const html = readFileSync(htmlPath, 'utf8');
+  res.type('html').send(html);
+});
+
+// Legacy v4 dashboard with brain-chat override injected before </body>
+app.get('/legacy', (req, res) => {
   const htmlPath = join(__dirname, '..', 'public', 'index.html');
   let html = readFileSync(htmlPath, 'utf8');
   const brainOverride = `<script type="module">
