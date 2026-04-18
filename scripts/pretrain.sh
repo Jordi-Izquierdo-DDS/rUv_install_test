@@ -37,6 +37,8 @@ const fs = require('fs');
 const net = require('net');
 
 (async () => {
+  // Ensure CWD is target (upstream pretrain uses process.cwd())
+  process.chdir('$TARGET');
   // 1. Run upstream pretrain (writes .agentic-flow/intelligence.json)
   const toolPath = path.join('$TARGET',
     'node_modules/agentic-flow/dist/mcp/fastmcp/tools/hooks/pretrain.js');
@@ -56,21 +58,41 @@ const net = require('net');
 
   // Send each pattern as a trajectory via IPC
   const ipc = (cmd) => new Promise((resolve) => {
+    const timer = setTimeout(() => { c.destroy(); resolve(null); }, 10000);
     const c = net.createConnection('$SOCK', () => { c.write(JSON.stringify(cmd) + '\n'); });
-    let b = ''; c.on('data', d => { b += d; const i = b.indexOf('\n'); if (i >= 0) { resolve(JSON.parse(b.slice(0, i))); c.destroy(); } });
-    c.on('error', () => resolve(null));
-    setTimeout(() => { c.destroy(); resolve(null); }, 10000);
+    let b = ''; c.on('data', d => { b += d; const i = b.indexOf('\n'); if (i >= 0) { clearTimeout(timer); resolve(JSON.parse(b.slice(0, i))); c.destroy(); } });
+    c.on('error', () => { clearTimeout(timer); resolve(null); });
   });
+
+  // Convert Q-learning states to realistic task descriptions that SemanticRouter
+  // can route correctly. "edit .ts" → "implement TypeScript module" — same quality
+  // as what a real user prompt would produce through the live system.
+  const stateToTask = {
+    'edit:.ts': 'implement TypeScript module', 'edit:.tsx': 'create React component',
+    'edit:.js': 'implement JavaScript module', 'edit:.mjs': 'implement ES module',
+    'edit:.cjs': 'implement CommonJS module', 'edit:.py': 'write Python script',
+    'edit:.rs': 'implement Rust module', 'edit:.go': 'implement Go service',
+    'edit:.css': 'fix CSS layout styling', 'edit:.html': 'create HTML page',
+    'edit:.yml': 'configure deployment pipeline', 'edit:.yaml': 'configure deployment pipeline',
+    'edit:.sh': 'write shell deployment script', 'edit:.json': 'configure project settings',
+    'edit:.java': 'implement Java class', 'edit:.kt': 'implement Kotlin module',
+    'edit:.php': 'implement PHP endpoint', 'edit:.rb': 'implement Ruby module',
+    'edit:.cs': 'implement C# class', 'edit:.cpp': 'implement C++ module',
+    'edit:.c': 'implement C module', 'edit:.h': 'define C header interface',
+    'edit:.sql': 'write database query', 'edit:.proto': 'define API protocol buffer',
+    'edit:.md': 'review documentation', 'edit:.test': 'write test cases',
+    'edit:.vue': 'create Vue component', 'edit:.dart': 'implement Dart widget',
+    'edit:.swift': 'implement Swift module',
+  };
 
   for (const [state, agents] of patterns) {
     const bestAgent = Object.entries(agents).sort((a, b) => b[1] - a[1])[0];
     if (!bestAgent) continue;
-    const text = state.replace(':', ' ');
-    // Quality from Q-learning score (upstream value, no artificial cap).
+    // Use realistic task text that SemanticRouter can match (not "edit .ts")
+    const text = stateToTask[state] || state.replace(':', ' ');
     const quality = Math.min(1.0, bestAgent[1] / 10);
     await ipc({ command: 'begin_trajectory', text });
-    // route() uses SemanticRouter (8/10) for agent assignment — better than ext map.
-    // setTrajectoryRoute fires inside route(), so sona gets the correct agent.
+    // route() uses SemanticRouter with realistic text → correct agent assignment
     await ipc({ command: 'route', task: text });
     await ipc({ command: 'end_trajectory', reward: quality });
   }
