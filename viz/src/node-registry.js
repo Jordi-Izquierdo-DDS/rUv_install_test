@@ -472,6 +472,73 @@ export const EXPECTED_NODES = [
     description: 'Per-session trajectory metadata: taskDescription, stepCount, computedQuality, route. Ephemeral in /tmp/.',
     origin: 'ruvector-init', mechanism: 'runtime', vanillaExpected: true },
 
+  // ── V5 RUVECTOR DAEMON + EMBEDDED SERVICES ────────────────
+  // Detected via .claude-flow/ruvector-daemon.{pid,sock} and readiness
+  // patterns in .claude-flow/data/daemon.log. In-process services (Sona,
+  // Verdict, Router, etc.) share the same daemon process, so `active`
+  // requires both a daemon PID and a readiness line.
+
+  { id: 'svc_ruvector_daemon_v5', label: 'ruvector-daemon (v5)', type: 'service', tier: 2, layer: 2,
+    description: 'v5 persistent daemon hosting SonaEngine, VerdictAnalyzer, SemanticRouter, etc. PID: .claude-flow/ruvector-daemon.pid · Sock: .claude-flow/ruvector-daemon.sock',
+    origin: 'ruflo-init', mechanism: 'runtime', vanillaExpected: true,
+    detectVia: 'ruvector-daemon-v5' },
+
+  { id: 'svc_sqlite_backend', label: 'SQLiteBackend (C4)', type: 'service', tier: 2, layer: 3,
+    description: 'C4 memory backend from @claude-flow/memory · writes memory_entries + memory_embeddings to .swarm/memory.db',
+    origin: 'ruflo-init', mechanism: 'runtime', vanillaExpected: true,
+    detectVia: 'daemon-log', logPattern: 'C4 memory: SQLiteBackend ready' },
+
+  { id: 'svc_sona_engine_v5', label: 'SonaEngine (v5)', type: 'service', tier: 2, layer: 2,
+    description: 'Rust-native SonaEngine in daemon: trajectory buffer + MicroLoRA + EWC++. Patterns persist to .claude-flow/sona/state.json.',
+    origin: 'ruvector-init', mechanism: 'runtime', vanillaExpected: true,
+    detectVia: 'daemon-log', logPattern: 'SonaEngine: (384-dim|state restored|no prior state)' },
+
+  { id: 'svc_adaptive_embedder', label: 'AdaptiveEmbedder', type: 'service', tier: 2, layer: 2,
+    description: '384-dim ONNX embedder (MiniLM via Xenova). 378/384 dense — confirms real ONNX path.',
+    origin: 'ruvector-init', mechanism: 'runtime', vanillaExpected: true,
+    detectVia: 'daemon-log', logPattern: 'AdaptiveEmbedder ready' },
+
+  { id: 'svc_intelligence_engine', label: 'IntelligenceEngine', type: 'service', tier: 2, layer: 2,
+    description: 'Composes sona+onnx+parallel+attention+HNSW for retrieve/route. Top-level v5 orchestrator.',
+    origin: 'ruvector-init', mechanism: 'runtime', vanillaExpected: true,
+    detectVia: 'daemon-log', logPattern: 'IntelligenceEngine: ready' },
+
+  { id: 'svc_neural_substrate', label: 'NeuralSubstrate', type: 'service', tier: 2, layer: 2,
+    description: 'Bundles coherence + drift + memory + state + swarm substrates.',
+    origin: 'ruvector-init', mechanism: 'runtime', vanillaExpected: true,
+    detectVia: 'daemon-log', logPattern: 'NeuralSubstrate: ready' },
+
+  { id: 'svc_reasoning_bank_v5', label: 'ReasoningBank (v5)', type: 'service', tier: 2, layer: 2,
+    description: 'VerdictAnalyzer-backed pattern bank · persists to .claude-flow/reasoning-bank/patterns.json.',
+    origin: 'ruvector-init', mechanism: 'runtime', vanillaExpected: true,
+    detectVia: 'daemon-log', logPattern: 'reasoningBank: (fresh|restored|persisted)' },
+
+  { id: 'svc_tensor_compress', label: 'TensorCompress', type: 'service', tier: 2, layer: 2,
+    description: 'Quantization + tensor compression for pattern storage.',
+    origin: 'ruvector-init', mechanism: 'runtime', vanillaExpected: true,
+    detectVia: 'daemon-log', logPattern: 'tensorCompress: (fresh|ready|restored)' },
+
+  { id: 'svc_semantic_router_v5', label: 'SemanticRouter (v5)', type: 'service', tier: 2, layer: 2,
+    description: 'Agent routing by semantic embedding similarity. N agents loaded at daemon boot.',
+    origin: 'ruvector-init', mechanism: 'runtime', vanillaExpected: true,
+    detectVia: 'daemon-log', logPattern: 'semanticRouter: \\d+ agents loaded' },
+
+  // ── V5 STORE NODES (missing from registry) ────────────────────
+  { id: 'json_sona_state_v5', label: 'sona/state.json', type: 'store_json', tier: 2, layer: 3,
+    path: '.claude-flow/sona/state.json',
+    description: 'SonaEngine patterns + ewc_task_count. Written by saveState() via NAPI overlay.',
+    origin: 'ruvector-init', mechanism: 'runtime', vanillaExpected: true },
+
+  { id: 'json_reasoning_bank', label: 'reasoning-bank/patterns.json', type: 'store_json', tier: 2, layer: 3,
+    path: '.claude-flow/reasoning-bank/patterns.json',
+    description: 'ReasoningBank verdict-backed patterns. Written by VerdictAnalyzer persist path.',
+    origin: 'ruvector-init', mechanism: 'runtime', vanillaExpected: true },
+
+  { id: 'json_agentic_intel', label: 'agentic-flow/intelligence.json', type: 'store_json', tier: 2, layer: 3,
+    path: '.agentic-flow/intelligence.json', onDemand: true,
+    description: 'Pretrain Q-table: file-type/dir → agent routing. Updated by agentic-flow pretrain.',
+    origin: 'ruflo-init', mechanism: 'runtime', vanillaExpected: true },
+
   // ── VIZ SERVER LAYER ────────────────────────────────────────
   // REMOVED: viz_server, viz_api, viz_helpers, cfg_viz_layout.
   // The monitoring surface is strictly the learning system —

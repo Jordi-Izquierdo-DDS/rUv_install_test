@@ -647,6 +647,66 @@ export function scanNodeSignals(node) {
     return buildResult();
   }
 
+  // ── detectVia: 'ruvector-daemon-v5' — v5 ruvector daemon PID+sock ──
+  // The v5 daemon runs under .claude-flow/ruvector-daemon.{pid,sock}; all
+  // in-process services (SonaEngine, VerdictAnalyzer, etc.) live inside it.
+  if (node.detectVia === 'ruvector-daemon-v5') {
+    const pidPath = resolvePath('.claude-flow/ruvector-daemon.pid');
+    const sockPath = resolvePath('.claude-flow/ruvector-daemon.sock');
+    signals.exists = existsSync(pidPath);
+    if (signals.exists) {
+      try {
+        const pid = parseInt(readFileSync(pidPath, 'utf8').trim(), 10);
+        process.kill(pid, 0);
+        signals.healthy = true;
+        signals.active = existsSync(sockPath);
+        node._dynamicStatusNote = signals.active
+          ? `PID ${pid} · socket open`
+          : `PID ${pid} · no socket`;
+      } catch {
+        signals.healthy = false;
+        node._dynamicStatusNote = 'PID file exists but process not running';
+      }
+    } else {
+      node._dynamicStatusNote = 'Not running';
+    }
+    return buildResult();
+  }
+
+  // ── detectVia: 'daemon-log' — service readiness from daemon.log ──
+  // Services embedded inside the v5 ruvector daemon don't have their own
+  // PID; their presence is confirmed by a readiness line in daemon.log.
+  // Active = daemon PID alive AND the readiness pattern has been seen.
+  if (node.detectVia === 'daemon-log' && node.logPattern) {
+    const logPath = resolvePath('.claude-flow/data/daemon.log');
+    let match = null;
+    if (existsSync(logPath)) {
+      try {
+        const lines = readFileSync(logPath, 'utf8').split('\n').filter(Boolean).slice(-400);
+        const re = new RegExp(node.logPattern);
+        match = [...lines].reverse().find(l => re.test(l));
+      } catch {}
+    }
+    signals.exists = !!match;
+    signals.healthy = !!match;
+    if (match) {
+      const pidPath = resolvePath('.claude-flow/ruvector-daemon.pid');
+      if (existsSync(pidPath)) {
+        try {
+          const pid = parseInt(readFileSync(pidPath, 'utf8').trim(), 10);
+          process.kill(pid, 0);
+          signals.active = true;
+        } catch {}
+      }
+      const msg = match.replace(/^[\d-]+T[\d:.]+Z\s+/, '').slice(0, 90);
+      node._dynamicStatusNote = signals.active ? `ready · ${msg}` : `seen · ${msg}`;
+      lastMod = (match.match(/^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)/) || [])[1] || undefined;
+    } else {
+      node._dynamicStatusNote = 'not seen in daemon.log';
+    }
+    return buildResult();
+  }
+
   if (node.type === 'trigger') {
     const settings = readJson('.claude/settings.json');
     if (settings?.hooks) {

@@ -16,15 +16,8 @@ app.use(express.json());
 const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="#8b5cf6"/></svg>`;
 app.get('/favicon.ico', (req, res) => res.type('image/svg+xml').send(FAVICON_SVG));
 
-// Serve v5 dashboard at root (standalone — no brain-chat override needed)
+// Learning Graph at root — with brain-chat override injected before </body>
 app.get('/', (req, res) => {
-  const htmlPath = join(__dirname, '..', 'public', 'v5.html');
-  const html = readFileSync(htmlPath, 'utf8');
-  res.type('html').send(html);
-});
-
-// Legacy v4 dashboard with brain-chat override injected before </body>
-app.get('/legacy', (req, res) => {
   const htmlPath = join(__dirname, '..', 'public', 'index.html');
   let html = readFileSync(htmlPath, 'utf8');
   const brainOverride = `<script type="module">
@@ -34,6 +27,13 @@ window.__initBrainChat = initBrainChat;
 setTimeout(() => { try { initBrainChat(); } catch {} }, 0);
 </script>`;
   html = html.replace('</body>', brainOverride + '\n</body>');
+  res.type('html').send(html);
+});
+
+// v5 data dashboard at /v5
+app.get('/v5', (req, res) => {
+  const htmlPath = join(__dirname, '..', 'public', 'v5.html');
+  const html = readFileSync(htmlPath, 'utf8');
   res.type('html').send(html);
 });
 

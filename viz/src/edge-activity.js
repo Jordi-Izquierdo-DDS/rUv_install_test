@@ -323,10 +323,73 @@ export function gatherActivity() {
   try { activity.daemonState = readJson('.claude-flow/data/hooks-daemon-state.json'); } catch {}
   try { activity.cliState = readJson('.claude-flow/daemon-state.json'); } catch {}
 
+  // ── Layer 3: v5 daemon.log events (in-process services) ───
+  // Parse .claude-flow/data/daemon.log and classify each line into an
+  // event kind. These feed the V5 edge mapping below so pulses animate
+  // when C4 stores, reasoningBank persists, SonaEngine saves, etc.
+  activity.v5Events = new Map();
+  try {
+    const daemonLogPath = resolve(DATA_ROOT, '.claude-flow/data/daemon.log');
+    if (existsSync(daemonLogPath)) {
+      const lines = readFileSync(daemonLogPath, 'utf8').split('\n').filter(Boolean).slice(-400);
+      const push = (k, ts) => {
+        const prev = activity.v5Events.get(k) || 0;
+        if (ts > prev) activity.v5Events.set(k, ts);
+      };
+      for (const line of lines) {
+        const m = line.match(/^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s+(.*)$/);
+        if (!m) continue;
+        const ts = new Date(m[1]).getTime();
+        if (isNaN(ts)) continue;
+        const msg = m[2];
+        if (/^C4 stored/.test(msg))                push('c4-store', ts);
+        if (/C4 memory: SQLiteBackend ready/.test(msg)) push('sqlite-backend', ts);
+        if (/^SonaEngine:/.test(msg))              push('sona-engine', ts);
+        if (/AdaptiveEmbedder ready/.test(msg))    push('embedder', ts);
+        if (/IntelligenceEngine: ready/.test(msg)) push('intel-engine', ts);
+        if (/NeuralSubstrate: ready/.test(msg))    push('neural-substrate', ts);
+        if (/^reasoningBank:/.test(msg))           push('reasoning-bank', ts);
+        if (/reasoningBank: persisted/.test(msg))  push('rbank-write', ts);
+        if (/^tensorCompress:/.test(msg))          push('tensor-compress', ts);
+        if (/^semanticRouter:/.test(msg))          push('semantic-router', ts);
+        if (/patterns: \d+ agents warm/.test(msg)) push('router-agents', ts);
+        if (/^daemon ready/.test(msg))             push('daemon-ready', ts);
+      }
+    }
+  } catch {}
+
   _cache = activity;
   _cacheTime = now;
   return activity;
 }
+
+// ─── V5 edge → daemon-log event key mapping ──────────────────────
+// Keyed by `${sourceId}→${targetId}:${type}`. Each entry lists daemon-log
+// event kinds whose last-seen timestamp should be treated as the edge's
+// lastFired. The client compares lastFired against _lastSeenFired and
+// pulses when it changes.
+const V5_EDGE_EVENTS = {
+  'eng_hook_handler→svc_ruvector_daemon_v5:fires':           ['daemon-ready', 'c4-store'],
+  'svc_ruvector_daemon_v5→svc_sqlite_backend:calls':         ['c4-store', 'sqlite-backend'],
+  'svc_sqlite_backend→db_memory:writes':                     ['c4-store'],
+  'svc_sqlite_backend→db_memory:reads':                      ['c4-store', 'sqlite-backend'],
+  'svc_ruvector_daemon_v5→svc_sona_engine_v5:calls':         ['sona-engine'],
+  'svc_sona_engine_v5→json_sona_state_v5:writes':            ['sona-engine'],
+  'svc_sona_engine_v5→json_sona_state_v5:reads':             ['sona-engine'],
+  'svc_ruvector_daemon_v5→svc_reasoning_bank_v5:calls':      ['rbank-write', 'reasoning-bank'],
+  'svc_reasoning_bank_v5→json_reasoning_bank:writes':        ['rbank-write'],
+  'svc_reasoning_bank_v5→json_reasoning_bank:reads':         ['reasoning-bank'],
+  'svc_ruvector_daemon_v5→svc_adaptive_embedder:calls':      ['embedder'],
+  'svc_ruvector_daemon_v5→svc_intelligence_engine:calls':    ['intel-engine'],
+  'svc_ruvector_daemon_v5→svc_neural_substrate:calls':       ['neural-substrate'],
+  'svc_ruvector_daemon_v5→svc_tensor_compress:calls':        ['tensor-compress'],
+  'svc_ruvector_daemon_v5→svc_semantic_router_v5:calls':     ['semantic-router', 'router-agents'],
+  'svc_intelligence_engine→svc_sona_engine_v5:uses':         ['intel-engine', 'sona-engine'],
+  'svc_intelligence_engine→svc_adaptive_embedder:uses':      ['intel-engine', 'embedder'],
+  'svc_intelligence_engine→svc_semantic_router_v5:uses':     ['intel-engine', 'semantic-router'],
+  'svc_intelligence_engine→json_agentic_intel:reads':        ['intel-engine'],
+  'svc_semantic_router_v5→json_agentic_intel:reads':         ['semantic-router'],
+};
 
 // ═══════════════════════════════════════════════════════════════
 // Edge evidence — given an edge, determine if it's alive
@@ -626,6 +689,28 @@ export function evaluateEdge(edge, nodeSignalMap, allNodes) {
       lastStatus: cfgAlive ? 'active' : bothExist ? 'idle' : 'broken',
       source: cfgAlive ? cfgSource : null,
     };
+  }
+
+  // ── V5 daemon.log events (Layer 3, in-process services) ──
+  // Matches fires/calls/uses/writes/reads edges for v5 service nodes.
+  if (!count && activity.v5Events?.size > 0) {
+    const edgeKey = `${edge.sourceId}→${edge.targetId}:${edge.type}`;
+    const kinds = V5_EDGE_EVENTS[edgeKey];
+    if (kinds) {
+      let best = 0;
+      for (const k of kinds) {
+        const t = activity.v5Events.get(k);
+        if (t && t > best) best = t;
+      }
+      // Use ONE_HOUR window: boot events (daemon-ready) are rare but
+      // stay meaningful for the session; activity events (c4-store) will
+      // refresh the timestamp within minutes.
+      if (best && isRecent(best, ONE_HOUR)) {
+        count = 1;
+        lastFired = new Date(best).toISOString();
+        source = 'daemon-log';
+      }
+    }
   }
 
   // ── Learning activity evidence (Layer 1) ──────────────────

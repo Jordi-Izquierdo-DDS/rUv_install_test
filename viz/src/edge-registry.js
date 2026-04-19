@@ -354,6 +354,42 @@ export const EXPECTED_EDGES = [
   { sourceId: 'mdl_hnsw', targetId: 'json_hnsw_meta', type: 'writes', label: 'runtime metadata (phantom)', origin: 'sparkleideas-cli' },
 
   // viz_server → viz_api (Express route registration)
+
+  // ══════════════════════════════════════════════════════════════
+  // V5 RUVECTOR DAEMON EDGES
+  // hook-handler fires events; daemon hosts all in-process services.
+  // ══════════════════════════════════════════════════════════════
+
+  // Hook dispatch — the handler fans events into the daemon socket.
+  { sourceId: 'eng_hook_handler', targetId: 'svc_ruvector_daemon_v5', type: 'fires',
+    label: 'hook events → daemon socket', origin: 'ruflo' },
+
+  // Daemon → in-process services (all run inside the same Node process).
+  { sourceId: 'svc_ruvector_daemon_v5', targetId: 'svc_sqlite_backend',      type: 'calls', label: 'C4 store/recall',           origin: 'ruflo' },
+  { sourceId: 'svc_ruvector_daemon_v5', targetId: 'svc_sona_engine_v5',      type: 'calls', label: 'trajectory + adapt',       origin: 'ruvector' },
+  { sourceId: 'svc_ruvector_daemon_v5', targetId: 'svc_adaptive_embedder',   type: 'calls', label: 'embed text (384-dim)',     origin: 'ruvector' },
+  { sourceId: 'svc_ruvector_daemon_v5', targetId: 'svc_intelligence_engine', type: 'calls', label: 'compose retrieve + route', origin: 'ruvector' },
+  { sourceId: 'svc_ruvector_daemon_v5', targetId: 'svc_neural_substrate',    type: 'calls', label: 'coherence + drift',        origin: 'ruvector' },
+  { sourceId: 'svc_ruvector_daemon_v5', targetId: 'svc_reasoning_bank_v5',   type: 'calls', label: 'verdict + pattern store',  origin: 'ruvector' },
+  { sourceId: 'svc_ruvector_daemon_v5', targetId: 'svc_tensor_compress',     type: 'calls', label: 'quantize pattern tensors', origin: 'ruvector' },
+  { sourceId: 'svc_ruvector_daemon_v5', targetId: 'svc_semantic_router_v5',  type: 'calls', label: 'route agent by embedding', origin: 'ruvector' },
+
+  // IntelligenceEngine composes sona + embedder + router.
+  { sourceId: 'svc_intelligence_engine', targetId: 'svc_sona_engine_v5',      type: 'uses', label: 'findPatterns',              origin: 'ruvector' },
+  { sourceId: 'svc_intelligence_engine', targetId: 'svc_adaptive_embedder',   type: 'uses', label: 'embed query',               origin: 'ruvector' },
+  { sourceId: 'svc_intelligence_engine', targetId: 'svc_semantic_router_v5',  type: 'uses', label: 'route by similarity',       origin: 'ruvector' },
+
+  // Service → store writes (the actual persistence surface).
+  { sourceId: 'svc_sona_engine_v5',     targetId: 'json_sona_state_v5',   type: 'writes', label: 'saveState() patterns', origin: 'ruvector' },
+  { sourceId: 'svc_sona_engine_v5',     targetId: 'json_sona_state_v5',   type: 'reads',  label: 'loadState() on boot',  origin: 'ruvector' },
+  { sourceId: 'svc_reasoning_bank_v5',  targetId: 'json_reasoning_bank',  type: 'writes', label: 'persist verdicts',     origin: 'ruvector' },
+  { sourceId: 'svc_reasoning_bank_v5',  targetId: 'json_reasoning_bank',  type: 'reads',  label: 'restore on boot',      origin: 'ruvector' },
+  { sourceId: 'svc_sqlite_backend',     targetId: 'db_memory',            type: 'writes', label: 'memory_entries + embeddings', origin: 'ruflo' },
+  { sourceId: 'svc_sqlite_backend',     targetId: 'db_memory',            type: 'reads',  label: 'recall by namespace',  origin: 'ruflo' },
+
+  // Pretrain Q-table consumed by router + intel engine.
+  { sourceId: 'svc_intelligence_engine', targetId: 'json_agentic_intel', type: 'reads', label: 'file-type routing Q-table', origin: 'ruflo' },
+  { sourceId: 'svc_semantic_router_v5',  targetId: 'json_agentic_intel', type: 'reads', label: 'dir/agent priors',          origin: 'ruflo' },
 ];
 
 // Quick lookup -- keyed by sourceId->targetId:type to avoid collisions
