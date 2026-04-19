@@ -1,0 +1,14 @@
+{
+  "workers": {
+    "preload": {
+      "runCount": 5,
+      "successCount": 5,
+      "failureCount": 0,
+      "averageDurationMs": 0,
+      "isRunning": false,
+      "lastTriggeredAt": "2026-04-18T16:23:59.924Z",
+      "lastResult": "{\n  \"timestamp\": \"2026-04-18T16:23:59.923Z\",\n  \"mode\": \"in-session\",\n  \"onnxWarm\": false,\n  \"bridgeWarm\": false,\n  \"intelligenceWarm\": false,\n  \"learningServiceWarm\": false,\n  \"allWarm\": false\n}",
+      "lastError": null
+    }
+  }
+}

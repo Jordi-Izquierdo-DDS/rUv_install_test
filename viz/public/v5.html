@@ -110,6 +110,7 @@
     <div class="tab" data-view="view-sona">Sona patterns</div>
     <div class="tab" data-view="view-rbank">ReasoningBank</div>
     <div class="tab" data-view="view-intel">Routing (intel)</div>
+    <div class="tab" data-view="view-retrieval">Retrieval</div>
     <div class="tab" data-view="view-traj">Trajectories</div>
     <div class="tab" data-view="view-events">Events</div>
   </div>
@@ -160,6 +161,16 @@
   <!-- rBank view -->
   <div class="view" id="view-rbank">
     <div class="panel">
+      <h2>Pattern evolution — <span id="rbank-evo-headline">—</span></h2>
+      <div id="rbank-evo-summary" style="margin-bottom:12px"></div>
+      <div style="max-height:360px;overflow:auto">
+        <table id="rbank-evo-table"><thead>
+          <tr><th>ID</th><th>Category</th><th>Uses</th><th>Success rate</th><th>Confidence</th><th>Trend</th><th>Trajectories</th></tr>
+        </thead><tbody></tbody></table>
+      </div>
+      <div id="rbank-evo-empty" style="font-size:11px;color:var(--dim);margin-top:8px"></div>
+    </div>
+    <div class="panel">
       <h2>ReasoningBank — <span id="rbank-count">—</span> total</h2>
       <div id="rbank-summary" style="margin-bottom:12px"></div>
       <div style="max-height:560px;overflow:auto">
@@ -188,8 +199,37 @@
     </div>
   </div>
 
+  <!-- Retrieval view -->
+  <div class="view" id="view-retrieval">
+    <div class="panel">
+      <h2>Retrieval quality — <span id="retr-count">—</span> queries (last 2000 log lines)</h2>
+      <div id="retr-summary" style="margin-bottom:12px"></div>
+      <div class="grid" style="margin-top:4px">
+        <div>
+          <h2 style="margin-top:4px">Recent queries (last 20)</h2>
+          <div id="retr-recent" style="max-height:520px;overflow:auto"></div>
+        </div>
+        <div>
+          <h2 style="margin-top:4px">Top route distribution</h2>
+          <div id="retr-routes"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Trajectories view -->
   <div class="view" id="view-traj">
+    <div class="panel">
+      <h2>Session trend — <span id="trend-headline">—</span></h2>
+      <div id="trend-summary" style="margin-bottom:12px"></div>
+      <svg id="trend-chart" width="100%" height="180" style="display:block;background:var(--bg);border-radius:4px"></svg>
+      <div style="max-height:260px;overflow:auto;margin-top:10px">
+        <table id="trend-table"><thead>
+          <tr><th>Exported at</th><th>Patterns</th><th>Δ</th><th>Trajectories</th><th>EWC</th><th>Learn</th></tr>
+        </thead><tbody></tbody></table>
+      </div>
+      <div id="trend-empty" style="font-size:11px;color:var(--dim);margin-top:8px"></div>
+    </div>
     <div class="panel">
       <h2>Session exports — <span id="traj-count">—</span></h2>
       <div id="traj-summary" style="margin-bottom:12px"></div>
@@ -218,6 +258,8 @@
     <code>/api/v5/events</code> ·
     <code>/api/sona</code> ·
     <code>/api/reasoningbank</code> ·
+    <code>/api/rbank-evolution</code> ·
+    <code>/api/sessions/trend</code> ·
     <code>/api/patterns</code>
   </footer>
 
@@ -262,7 +304,7 @@ function fmtBytes(n) {
 }
 
 async function refresh() {
-  const [cycle, services, deg, trajectories, intel, events, sona, rbank] = await Promise.all([
+  const [cycle, services, deg, trajectories, intel, events, sona, rbank, ewcProg, retrieval, rbankEvo, trend] = await Promise.all([
     fetch('/api/v5/cycle').then(r => r.json()),
     fetch('/api/v5/services').then(r => r.json()),
     fetch('/api/v5/degradation').then(r => r.json()),
@@ -271,6 +313,10 @@ async function refresh() {
     fetch('/api/v5/events?limit=80').then(r => r.json()),
     fetch('/api/sona').then(r => r.json()),
     fetch('/api/reasoningbank').then(r => r.json()),
+    fetch('/api/ewc-progress').then(r => r.json()).catch(() => null),
+    fetch('/api/retrieval-stats').then(r => r.json()).catch(() => null),
+    fetch('/api/rbank-evolution').then(r => r.json()).catch(() => null),
+    fetch('/api/sessions/trend').then(r => r.json()).catch(() => null),
   ]);
 
   // Header
@@ -289,15 +335,20 @@ async function refresh() {
   renderC4Log(services);
 
   // === Sona ===
-  renderSona(sona);
+  renderSona(sona, ewcProg);
 
   // === rBank ===
+  renderRbankEvolution(rbankEvo);
   renderRbank(rbank);
 
   // === Intel ===
   renderIntel(intel);
 
+  // === Retrieval ===
+  renderRetrieval(retrieval);
+
   // === Trajectories ===
+  renderTrend(trend);
   renderTrajectories(trajectories);
 
   // === Events ===
@@ -421,12 +472,42 @@ function renderC4Log(services) {
     + (services.errors.length ? `<div style="margin-top:8px;color:var(--err);font-size:10px">${services.errors.length} error line(s)</div>` : '');
 }
 
-function renderSona(sona) {
+// EWC++ progress bar — replaces the old `EWC tasks: 0` badge which looked
+// broken. The 50-sample gate is upstream calibration (task-boundary detection
+// needs history to converge on a mean), so zero task_count before 50 samples
+// is expected, not a fault. Show progress toward the gate so "why didn't EWC
+// consolidate yet?" is self-explanatory.
+function renderEwcProgress(p, fallbackTaskCount) {
+  if (!p || !p.available) {
+    const tc = p?.taskCount ?? fallbackTaskCount ?? 0;
+    return `<span class="badge warn" title="daemon IPC unreachable; falling back to persisted state">EWC tasks: ${tc}</span>`;
+  }
+  const { samplesSeen, target, percent, remainingToDetection, taskCount } = p;
+  const barColor = taskCount > 0 ? 'var(--ok)' : percent >= 75 ? 'var(--warn)' : 'var(--accent)';
+  const subtitle = taskCount > 0
+    ? `consolidated ${taskCount} task(s)`
+    : `first consolidation in ~${remainingToDetection} cycles`;
+  return `
+    <div style="display:flex;flex-direction:column;gap:3px;min-width:220px"
+         title="EWC++ needs ${target} samples before the first task-boundary detection. Upstream calibration, not a bug.">
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--dim)">
+        <span>EWC++ progress</span>
+        <span><strong style="color:var(--text)">${samplesSeen}/${target}</strong> samples · tasks: ${taskCount}</span>
+      </div>
+      <div style="height:6px;background:#151531;border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:${percent}%;background:${barColor};transition:width 0.3s"></div>
+      </div>
+      <div style="font-size:10px;color:var(--dim)">${subtitle}</div>
+    </div>
+  `;
+}
+
+function renderSona(sona, ewcProg) {
   const s = sona.sona;
   document.getElementById('sona-count').textContent = s.patternCount;
   document.getElementById('sona-summary').innerHTML = `
-    <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:11px">
-      <span class="badge ok">EWC tasks: ${s.ewcTaskCount}</span>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:11px;align-items:center">
+      ${renderEwcProgress(ewcProg, s.ewcTaskCount)}
       <span class="badge ${s.instantEnabled?'ok':'err'}">instant: ${s.instantEnabled}</span>
       <span class="badge ${s.backgroundEnabled?'ok':'err'}">background: ${s.backgroundEnabled}</span>
       <span class="badge cat">state: ${fmtBytes(s.stateBytes)}</span>
@@ -455,6 +536,62 @@ function renderSona(sona) {
     </tr>
   `).join('');
   document.querySelector('#sona-table tbody').innerHTML = rows;
+}
+
+// Pattern-evolution widget — Fix 22 consumer.
+// Reads /api/rbank-evolution (usage_count / success_count / confidence per pattern).
+// Early sessions show all zeros — that's correct, not a bug: patterns only
+// accumulate feedback once trajectories end with quality >= 0.5.
+function renderRbankEvolution(e) {
+  const headline = document.getElementById('rbank-evo-headline');
+  const summary = document.getElementById('rbank-evo-summary');
+  const empty = document.getElementById('rbank-evo-empty');
+  const tbody = document.querySelector('#rbank-evo-table tbody');
+  if (!e) {
+    headline.textContent = '—';
+    summary.innerHTML = '<div class="badge warn">endpoint unreachable</div>';
+    tbody.innerHTML = '';
+    empty.textContent = '';
+    return;
+  }
+  headline.textContent = `${e.used}/${e.total} used`;
+  summary.innerHTML = `
+    <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:11px">
+      <span class="badge cat">total: <strong>${e.total}</strong></span>
+      <span class="badge ok">used: <strong>${e.used}</strong></span>
+      <span class="badge warn">unused: <strong>${e.unused}</strong></span>
+      <span class="badge route">baseline confidence: ${e.baseline}</span>
+    </div>
+  `;
+  if (e.used === 0) {
+    tbody.innerHTML = '';
+    empty.innerHTML = e.total === 0
+      ? 'no patterns in reasoning bank yet — run trajectories to seed them.'
+      : `no patterns used yet — run more sessions. ${e.unused} patterns are candidates for <code>pruneLowQuality</code> once usage accumulates.`;
+    return;
+  }
+  const arrow = (t) => t === 'up' ? '<span style="color:var(--ok)">↑</span>'
+    : t === 'down' ? '<span style="color:var(--err)">↓</span>'
+    : '<span style="color:var(--dim)">→</span>';
+  tbody.innerHTML = e.topUsed.map(p => {
+    const rateColor = p.successRate >= 0.8 ? 'var(--ok)' : p.successRate >= 0.5 ? 'var(--warn)' : 'var(--err)';
+    const confColor = p.confidence >= 0.7 ? 'var(--ok)' : p.confidence >= 0.4 ? 'var(--warn)' : 'var(--err)';
+    const trajIds = (p.sourceTrajectories || []).join(', ') || '—';
+    return `
+      <tr>
+        <td>${p.id}</td>
+        <td><span class="badge cat">${p.category}</span></td>
+        <td>${p.usage}</td>
+        <td style="color:${rateColor}">${(p.successRate * 100).toFixed(0)}% <span style="color:var(--dim);font-size:10px">(${p.success}/${p.usage})</span></td>
+        <td style="color:${confColor}">${p.confidence.toFixed(3)}</td>
+        <td title="Δ vs baseline ${p.confidenceDelta >= 0 ? '+' : ''}${p.confidenceDelta}">${arrow(p.trend)}</td>
+        <td style="font-size:10px;color:var(--dim)">${trajIds}</td>
+      </tr>
+    `;
+  }).join('');
+  empty.innerHTML = e.unused > 0
+    ? `${e.unused} unused pattern${e.unused === 1 ? '' : 's'} — candidates for <code>pruneLowQuality</code>.`
+    : '';
 }
 
 function renderRbank(rb) {
@@ -526,6 +663,170 @@ function renderIntel(intel) {
     <div class="kv"><span class="k">Total routes</span><span class="v">${intel.metrics?.totalRoutes ?? 0}</span></div>
     <div class="kv"><span class="k">Successful routes</span><span class="v">${intel.metrics?.successfulRoutes ?? 0}</span></div>
   `;
+}
+
+// Retrieval-quality widget — Fix 21 consumer.
+// Parses findPatterns telemetry from daemon.log (via /api/retrieval-stats,
+// cached server-side ~10s) into summary + route distribution + recent feed.
+function renderRetrieval(r) {
+  const countEl = document.getElementById('retr-count');
+  const summaryEl = document.getElementById('retr-summary');
+  const routesEl = document.getElementById('retr-routes');
+  const recentEl = document.getElementById('retr-recent');
+  if (!r || r.present === false) {
+    countEl.textContent = '—';
+    const reason = !r ? 'endpoint unreachable' : 'daemon.log missing';
+    summaryEl.innerHTML = `<div class="badge warn">${reason}</div>`;
+    routesEl.innerHTML = ''; recentEl.innerHTML = '';
+    return;
+  }
+  countEl.textContent = r.count;
+  const qColor = r.avgQuality >= 0.8 ? 'var(--ok)' : r.avgQuality >= 0.5 ? 'var(--warn)' : 'var(--err)';
+  summaryEl.innerHTML = `
+    <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:11px">
+      <span class="badge cat">queries: <strong>${r.count}</strong></span>
+      <span class="badge route">avg hits: <strong>${r.avgHits.toFixed(2)}</strong></span>
+      <span class="badge ok" style="color:${qColor}">avg top-1 quality: <strong>${r.avgQuality.toFixed(3)}</strong></span>
+      <span class="badge cat">routes seen: ${Object.keys(r.byTopRoute || {}).length}</span>
+    </div>
+  `;
+
+  const routes = Object.entries(r.byTopRoute || {}).sort((a, b) => b[1] - a[1]);
+  const maxCount = routes[0]?.[1] || 1;
+  routesEl.innerHTML = routes.map(([name, count]) => {
+    const pct = (count / r.count * 100).toFixed(1);
+    return `
+      <div class="bar-row">
+        <span class="name" title="${name}">${name}</span>
+        <span class="bar"><span class="bar-fill" style="width:${(count/maxCount*100).toFixed(1)}%"></span></span>
+        <span class="val">${count} · ${pct}%</span>
+      </div>`;
+  }).join('') || '<div style="color:var(--dim);font-size:10px">no queries yet</div>';
+
+  recentEl.innerHTML = (r.recent || []).map(q => {
+    const ts = (q.timestamp || '').split('T')[1]?.slice(0, 8) || '—';
+    const qc = q.quality >= 0.8 ? 'var(--ok)' : q.quality >= 0.5 ? 'var(--warn)' : 'var(--err)';
+    const safeQ = (q.q || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `
+      <div class="event-line info" style="flex-direction:column;align-items:flex-start;padding:6px 8px;border-left-color:${qc}">
+        <div style="display:flex;gap:8px;width:100%;align-items:baseline">
+          <span class="ts">${ts}</span>
+          <span class="badge route">${q.top}</span>
+          <span class="badge cat">hits: ${q.hits}</span>
+          <span class="badge" style="background:rgba(139,92,246,0.15);color:${qc}">q${q.quality.toFixed(2)}</span>
+        </div>
+        <div style="color:var(--text);margin-top:3px;font-size:10px;white-space:normal;overflow-wrap:anywhere">${safeQ}</div>
+      </div>
+    `;
+  }).join('') || '<div style="color:var(--dim);font-size:10px">no recent queries</div>';
+}
+
+// Session-trend widget — NEXT_SESSION_05 task 5.
+// Renders pattern-count growth across session_end snapshots with:
+//   • bar per session, height = patterns_stored
+//   • EWC-task boundaries marked with a vertical tick
+//   • regressions (negative pattern delta) highlighted red
+//   • learnStatus shown as a glyph on each bar
+function renderTrend(t) {
+  const headline = document.getElementById('trend-headline');
+  const summary = document.getElementById('trend-summary');
+  const svg = document.getElementById('trend-chart');
+  const tbody = document.querySelector('#trend-table tbody');
+  const empty = document.getElementById('trend-empty');
+  if (!t || t.present === false || !t.sessions || t.sessions.length === 0) {
+    headline.textContent = '—';
+    summary.innerHTML = '<div class="badge warn">no session exports yet</div>';
+    svg.innerHTML = '';
+    tbody.innerHTML = '';
+    empty.textContent = 'session trend will populate once session_end snapshots land in .claude-flow/metrics/.';
+    return;
+  }
+  const rows = t.sessions;
+  const totals = t.totals || {};
+  const growth = totals.patternGrowth ?? 0;
+  const growthColor = growth > 0 ? 'var(--ok)' : growth < 0 ? 'var(--err)' : 'var(--dim)';
+  headline.textContent = `${rows.length} sessions`;
+  summary.innerHTML = `
+    <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:11px;align-items:center">
+      <span class="badge cat">sessions: <strong>${rows.length}</strong></span>
+      <span class="badge" style="background:rgba(139,92,246,0.15);color:${growthColor}">
+        patterns: ${totals.firstPatterns} → ${totals.lastPatterns}
+        (${growth >= 0 ? '+' : ''}${growth})
+      </span>
+      <span class="badge ok">learn completed: ${totals.learnCompleted}</span>
+      <span class="badge warn">learn skipped: ${totals.learnSkipped}</span>
+      <span class="badge ${totals.regressions > 0 ? 'err' : 'ok'}">regressions: ${totals.regressions}</span>
+    </div>
+  `;
+
+  // SVG chart — compact bar chart, axis-free (table below carries exact values).
+  const W = svg.clientWidth || 800;
+  const H = 180;
+  const PAD_L = 32, PAD_R = 12, PAD_T = 12, PAD_B = 28;
+  const innerW = W - PAD_L - PAD_R;
+  const innerH = H - PAD_T - PAD_B;
+  const maxP = Math.max(1, ...rows.map(r => r.patterns));
+  const bw = Math.max(4, (innerW / rows.length) - 4);
+  const stepX = innerW / rows.length;
+  const ticks = [0, Math.ceil(maxP / 2), maxP];
+  let html = `<g font-size="9" fill="#8b8ba7">`;
+  for (const tk of ticks) {
+    const y = PAD_T + innerH - (tk / maxP) * innerH;
+    html += `<line x1="${PAD_L}" x2="${W - PAD_R}" y1="${y}" y2="${y}" stroke="#2a2a4a" stroke-dasharray="2,3"/>`;
+    html += `<text x="${PAD_L - 4}" y="${y + 3}" text-anchor="end">${tk}</text>`;
+  }
+  html += `</g>`;
+  rows.forEach((r, i) => {
+    const x = PAD_L + i * stepX + 2;
+    const h = (r.patterns / maxP) * innerH;
+    const y = PAD_T + innerH - h;
+    const fill = r.regression ? '#ef4444'
+      : r.learnStatus === 'completed' ? '#22c55e'
+      : r.learnStatus === 'skipped' ? '#eab308'
+      : '#8b5cf6';
+    const ts = (r.exportedAt || '').slice(11, 16) || '—';
+    const delta = r.patternDelta == null ? '' : (r.patternDelta >= 0 ? '+' : '') + r.patternDelta;
+    const tooltip = `${r.exportedAt || r.id}\npatterns=${r.patterns} (${delta || 'baseline'})\nlearn=${r.learnStatus || '—'}\newc_tasks=${r.ewcTasks}`;
+    html += `<g>`;
+    html += `<title>${tooltip.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</title>`;
+    html += `<rect x="${x}" y="${y}" width="${bw}" height="${h}" fill="${fill}" rx="2"/>`;
+    if (r.ewcBoundary) {
+      html += `<line x1="${x - 2}" x2="${x - 2}" y1="${PAD_T}" y2="${PAD_T + innerH}" stroke="#c4b5fd" stroke-width="2"/>`;
+      html += `<text x="${x - 4}" y="${PAD_T + 8}" text-anchor="end" font-size="8" fill="#c4b5fd">EWC</text>`;
+    }
+    if (r.regression) {
+      html += `<text x="${x + bw / 2}" y="${y - 3}" text-anchor="middle" font-size="9" fill="#ef4444">↓</text>`;
+    }
+    html += `<text x="${x + bw / 2}" y="${H - PAD_B + 12}" text-anchor="middle" font-size="8" fill="#8b8ba7">${ts}</text>`;
+    html += `</g>`;
+  });
+  html += `<g font-size="9" fill="#8b8ba7">`;
+  html += `<text x="${W - PAD_R}" y="${H - 4}" text-anchor="end">patterns_stored per session_end · green=completed · yellow=skipped · red=regression</text>`;
+  html += `</g>`;
+  svg.innerHTML = html;
+
+  tbody.innerHTML = rows.slice().reverse().map(r => {
+    const d = r.patternDelta;
+    const deltaStr = d == null ? '—' : (d >= 0 ? '+' : '') + d;
+    const deltaColor = d == null ? 'var(--dim)' : d > 0 ? 'var(--ok)' : d < 0 ? 'var(--err)' : 'var(--dim)';
+    const learnBadge = r.learnStatus === 'completed' ? 'ok'
+      : r.learnStatus === 'skipped' ? 'warn'
+      : 'cat';
+    const flag = r.regression ? ' <span style="color:var(--err)" title="pattern count decreased">↓ regression</span>' : '';
+    return `
+      <tr${r.regression ? ' style="background:rgba(239,68,68,0.08)"' : ''}>
+        <td style="font-size:10px;color:var(--dim)">${fmtTs(r.exportedAt)}</td>
+        <td>${r.patterns}${flag}</td>
+        <td style="color:${deltaColor}">${deltaStr}</td>
+        <td>${r.trajectories}</td>
+        <td>${r.ewcTasks}${r.ewcBoundary ? ' <span style="color:#c4b5fd" title="EWC task boundary crossed">⚑</span>' : ''}</td>
+        <td><span class="badge ${learnBadge}">${r.learnStatus || '—'}</span></td>
+      </tr>
+    `;
+  }).join('');
+  empty.textContent = totals.regressions > 0
+    ? `⚠ ${totals.regressions} session${totals.regressions === 1 ? '' : 's'} show a pattern-count decrease — investigate prune / reset events.`
+    : '';
 }
 
 function renderTrajectories(t) {

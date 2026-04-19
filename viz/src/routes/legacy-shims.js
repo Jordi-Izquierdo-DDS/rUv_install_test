@@ -164,10 +164,10 @@ function buildArchitectureLive() {
       qValues: intelTotalQ,
       tierSummary: `w:${tiers.working} e:${tiers.episodic} s:${tiers.semantic}`,
       mailbox: (intel.memories || []).length,
-      revolutions: trajectoryCount,
+      trajectoryCount,
     },
     behaviors: [],
-    revolutions: trajectoryCount,
+    trajectoryCount,
     improvement: {
       ready: sonaPatterns.length > 0 && rbank.length > 0,
       sessions: trajectoryCount,

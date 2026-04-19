@@ -19,6 +19,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
 import { resolve, join } from 'path';
 import { homedir } from 'os';
+import net from 'net';
 import { openDb, readJson, resolvePath } from '../helpers.js';
 
 const DATA_ROOT = process.env.DATA_ROOT || process.cwd();
@@ -127,6 +128,100 @@ const METRICS_DIR  = '.claude-flow/metrics';
 const METRICS_LAST = '.claude-flow/metrics/session-latest.json';
 const DAEMON_LOG   = '.claude-flow/data/daemon.log';
 const HOOK_LOG     = '.claude-flow/data/hook-debug.log';
+const DAEMON_SOCK  = '.claude-flow/ruvector-daemon.sock';
+const EWC_TARGET_SAMPLES = 50;
+
+// One-shot line-framed IPC to the ruvector daemon — mirror of the client in
+// .claude/helpers/hook-handler.cjs:108 (sendCommand). Read-only here; the
+// daemon stays the sole writer (single-writer rule). Timeout short so a dead
+// socket never hangs the dashboard poll.
+function daemonStatus(timeoutMs = 1500) {
+  return new Promise((resolve) => {
+    const sockPath = resolvePath(DAEMON_SOCK);
+    if (!existsSync(sockPath)) return resolve(null);
+    let done = false;
+    const settle = (v) => { if (!done) { done = true; resolve(v); } };
+    const sock = net.createConnection(sockPath, () => {
+      sock.write(JSON.stringify({ command: 'status' }) + '\n');
+    });
+    const timer = setTimeout(() => { sock.destroy(); settle(null); }, timeoutMs);
+    let buf = '';
+    sock.on('data', (d) => {
+      buf += d.toString();
+      const i = buf.indexOf('\n');
+      if (i !== -1) {
+        clearTimeout(timer);
+        try { settle(JSON.parse(buf.slice(0, i))); } catch { settle(null); }
+        sock.destroy();
+      }
+    });
+    sock.on('error', () => { clearTimeout(timer); settle(null); });
+  });
+}
+
+// ─── findPatterns retrieval-stats log parser ──────────────────────
+// Fix 21: the daemon logs one line per findPatterns call, format:
+//   <iso-ts> findPatterns: q="<query>" hits=<N> top=<agent>@q<quality>
+// Parse the tail of daemon.log, aggregate, and cache for RETRIEVAL_TTL so
+// dashboard polls don't hammer the filesystem.
+const RETRIEVAL_LINES   = 2000;
+const RETRIEVAL_TTL_MS  = 10000;
+const RETRIEVAL_RECENT  = 20;
+const RETRIEVAL_REGEX   = /findPatterns: q="([^"]*)" hits=(\d+) top=(\S+)@q([\d.]+)/;
+let _retrievalCache = null; // { ts, sig, payload }
+
+function computeRetrievalStats() {
+  const p = resolvePath(DAEMON_LOG);
+  if (!existsSync(p)) {
+    return { count: 0, avgQuality: 0, avgHits: 0, byTopRoute: {}, recent: [], source: DAEMON_LOG, present: false };
+  }
+  const stat = statSync(p);
+  const sig = `${stat.size}:${stat.mtimeMs}`;
+  const now = Date.now();
+  if (_retrievalCache && _retrievalCache.sig === sig && (now - _retrievalCache.ts) < RETRIEVAL_TTL_MS) {
+    return _retrievalCache.payload;
+  }
+
+  let content;
+  try { content = readFileSync(p, 'utf8'); }
+  catch { return { count: 0, avgQuality: 0, avgHits: 0, byTopRoute: {}, recent: [], source: DAEMON_LOG, present: false }; }
+
+  const lines = content.split('\n');
+  const scan = lines.length > RETRIEVAL_LINES ? lines.slice(-RETRIEVAL_LINES) : lines;
+  const queries = [];
+  for (const line of scan) {
+    if (!line || line.indexOf('findPatterns:') === -1) continue;
+    const tsMatch = line.match(/^(\d{4}-\d{2}-\d{2}T[\d:.]+Z)\s+/);
+    const m = line.match(RETRIEVAL_REGEX);
+    if (!m) continue;
+    queries.push({
+      timestamp: tsMatch ? tsMatch[1] : null,
+      q: m[1],
+      hits: Number(m[2]),
+      top: m[3],
+      quality: Number(m[4]),
+    });
+  }
+
+  const n = queries.length;
+  const avgQuality = n ? queries.reduce((s, q) => s + q.quality, 0) / n : 0;
+  const avgHits = n ? queries.reduce((s, q) => s + q.hits, 0) / n : 0;
+  const byTopRoute = {};
+  for (const q of queries) byTopRoute[q.top] = (byTopRoute[q.top] || 0) + 1;
+
+  const payload = {
+    count: n,
+    avgQuality: Number(avgQuality.toFixed(3)),
+    avgHits: Number(avgHits.toFixed(2)),
+    byTopRoute,
+    recent: queries.slice(-RETRIEVAL_RECENT).reverse(),
+    source: DAEMON_LOG,
+    present: true,
+    cachedAt: now,
+  };
+  _retrievalCache = { ts: now, sig, payload };
+  return payload;
+}
 
 function safeJson(s, fallback) {
   if (s == null || s === '') return fallback;
@@ -383,6 +478,188 @@ export function registerTrajectoryRoutes(app) {
         count: rewards.length,
         captured: rewards.length > 0,
         learned: rewards.length,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── /api/retrieval-stats ─────────────────────────────────────
+  // Fix 21: per-query findPatterns telemetry from daemon.log. Read-only,
+  // parses the last ~2000 lines, cached for 10s (keyed on file size+mtime so
+  // growing the log invalidates faster than the TTL).
+  app.get('/api/retrieval-stats', (req, res) => {
+    try {
+      res.json(computeRetrievalStats());
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── /api/rbank-evolution ─────────────────────────────────────
+  // Fix 22: per-pattern usage/success/confidence evolution from rbank JSON.
+  // Patterns accumulate record_usage feedback across trajectories — this
+  // endpoint surfaces which ones actually fired, how often, and how their
+  // confidence has moved vs the 0.5 starting prior. Early sessions are all
+  // zeros by design (no trajectories have ended yet); the UI labels that.
+  app.get('/api/rbank-evolution', (req, res) => {
+    try {
+      const raw = readJson(RBANK) || [];
+      const rbank = Array.isArray(raw) ? raw : [];
+      const sorted = [...rbank].sort(
+        (a, b) => (b.usage_count || 0) - (a.usage_count || 0)
+      );
+      const used = sorted.filter(p => (p.usage_count || 0) > 0);
+      const unused = sorted.filter(p => (p.usage_count || 0) === 0);
+      const BASELINE = 0.5; // rbank starting prior
+      const topUsed = used.slice(0, 10).map(p => {
+        const usage = p.usage_count || 0;
+        const success = p.success_count || 0;
+        const confidence = typeof p.confidence === 'number' ? p.confidence : 0;
+        const successRate = usage > 0 ? success / usage : 0;
+        const delta = confidence - BASELINE;
+        const trend = delta > 0.05 ? 'up' : delta < -0.05 ? 'down' : 'flat';
+        return {
+          id: p.id,
+          uuid: p.uuid,
+          category: p.category || 'unknown',
+          usage,
+          success,
+          successRate: Number(successRate.toFixed(3)),
+          confidence: Number(confidence.toFixed(3)),
+          avgQuality: typeof p.avg_quality === 'number' ? Number(p.avg_quality.toFixed(3)) : null,
+          trend,
+          confidenceDelta: Number(delta.toFixed(3)),
+          lastAccessed: p.last_accessed || null,
+          sourceTrajectories: Array.isArray(p.source_trajectories) ? p.source_trajectories : [],
+        };
+      });
+      res.json({
+        total: rbank.length,
+        used: used.length,
+        unused: unused.length,
+        baseline: BASELINE,
+        topUsed,
+        source: RBANK,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── /api/sessions/trend ──────────────────────────────────────
+  // NEXT_SESSION_05 task 5: chronological session snapshots for a trend
+  // widget. Each session_end emits `.claude-flow/metrics/session-<ts>.json`;
+  // this endpoint composes that directory (skipping session-latest.json,
+  // which is a symlink-style copy) into an ordered series. Pattern-count
+  // deltas drive the growth annotation, and any negative delta is flagged
+  // as a regression candidate so the dashboard can light it up.
+  app.get('/api/sessions/trend', (req, res) => {
+    try {
+      const dir = resolvePath(METRICS_DIR);
+      if (!existsSync(dir)) {
+        return res.json({ sessions: [], count: 0, regressions: 0, source: METRICS_DIR, present: false });
+      }
+      const files = readdirSync(dir)
+        .filter(f => f.startsWith('session-') && f.endsWith('.json') && f !== 'session-latest.json')
+        .sort(); // filenames carry ms timestamp — lexical sort == chronological
+      // learnStatus in the raw snapshot is a verbose sentence
+      // ("Forced learning: N trajectories -> M patterns, status: completed").
+      // Classify into a normalized token for counters + badge colors; keep
+      // the original string as learnStatusRaw for tooltips.
+      const classifyLearn = (s) => {
+        if (!s || typeof s !== 'string') return 'unknown';
+        const m = s.match(/status:\s*([a-z_]+)/i);
+        if (m) return m[1].toLowerCase();
+        if (/completed/i.test(s)) return 'completed';
+        if (/skipped/i.test(s)) return 'skipped';
+        if (/failed|error/i.test(s)) return 'failed';
+        return 'unknown';
+      };
+      const rows = [];
+      for (const f of files) {
+        const raw = readJson(`${METRICS_DIR}/${f}`);
+        if (!raw) continue;
+        let stats = {};
+        try { stats = raw.sonaStats ? JSON.parse(raw.sonaStats) : {}; } catch {}
+        rows.push({
+          file: f,
+          id: f.replace(/^session-/, '').replace(/\.json$/, ''),
+          exportedAt: raw.exportedAt || null,
+          timestampMs: raw.exportedAt ? new Date(raw.exportedAt).getTime() : null,
+          patterns: Number(stats.patterns_stored) || 0,
+          patternsLearned: Number(stats.patterns_learned) || 0,
+          trajectories: Number(raw.trajectoryCount) || 0,
+          trajectoriesRecorded: Number(stats.trajectories_recorded) || 0,
+          learnStatus: classifyLearn(raw.learnStatus),
+          learnStatusRaw: raw.learnStatus || null,
+          ewcTasks: Number(stats.ewc_tasks) || 0,
+          stateBytes: Number(raw.stateBytes) || 0,
+        });
+      }
+      // Deltas + regression flag. Pattern count is cumulative across sessions,
+      // so a negative delta = patterns dropped (prune, corruption, or reset).
+      let regressions = 0;
+      let prevPatterns = null;
+      let prevEwcTasks = null;
+      for (const r of rows) {
+        r.patternDelta = prevPatterns == null ? null : r.patterns - prevPatterns;
+        r.regression = r.patternDelta != null && r.patternDelta < 0;
+        r.ewcBoundary = prevEwcTasks != null && r.ewcTasks > prevEwcTasks;
+        if (r.regression) regressions += 1;
+        prevPatterns = r.patterns;
+        prevEwcTasks = r.ewcTasks;
+      }
+      const last = rows[rows.length - 1];
+      const first = rows[0];
+      const totals = {
+        sessions: rows.length,
+        regressions,
+        patternGrowth: first && last ? last.patterns - first.patterns : 0,
+        firstPatterns: first?.patterns ?? 0,
+        lastPatterns: last?.patterns ?? 0,
+        learnCompleted: rows.filter(r => r.learnStatus === 'completed').length,
+        learnSkipped: rows.filter(r => r.learnStatus === 'skipped').length,
+      };
+      res.json({ sessions: rows, count: rows.length, totals, source: METRICS_DIR, present: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ─── /api/ewc-progress ────────────────────────────────────────
+  // Live EWC++ consolidation progress from the daemon (Fix 23). The 50-sample
+  // gate is upstream calibration: the first consolidation fires once
+  // samples_seen crosses EWC_TARGET_SAMPLES. Before then, ewc_task_count stays
+  // at 0 — that's expected, not a bug. This endpoint surfaces the progress so
+  // the dashboard can show "4/50 samples" instead of a misleading "0 tasks".
+  app.get('/api/ewc-progress', async (req, res) => {
+    try {
+      const status = await daemonStatus();
+      const ewc = status?.ok && status?.data?.ewc ? status.data.ewc : null;
+      if (!ewc) {
+        return res.json({
+          available: false,
+          samplesSeen: 0,
+          taskCount: 0,
+          remainingToDetection: EWC_TARGET_SAMPLES,
+          percent: 0,
+          target: EWC_TARGET_SAMPLES,
+          reason: existsSync(resolvePath(DAEMON_SOCK)) ? 'daemon-unreachable' : 'no-socket',
+        });
+      }
+      const samplesSeen = Number(ewc.samples_seen) || 0;
+      const remaining = ewc.remaining_to_detection != null
+        ? Number(ewc.remaining_to_detection)
+        : Math.max(0, EWC_TARGET_SAMPLES - samplesSeen);
+      const percent = Math.min(100, Math.round((samplesSeen / EWC_TARGET_SAMPLES) * 100));
+      res.json({
+        available: true,
+        samplesSeen,
+        taskCount: Number(ewc.task_count) || 0,
+        remainingToDetection: remaining,
+        percent,
+        target: EWC_TARGET_SAMPLES,
       });
     } catch (err) {
       res.status(500).json({ error: err.message });
