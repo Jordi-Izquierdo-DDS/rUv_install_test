@@ -176,71 +176,9 @@ function buildArchitectureLive() {
   };
 }
 
-// ─── Sessions history for /api/trajectories ─────────────────────
-// Legacy field names: id, sessionId, goal, createdAt, stepCount, reward, model.
-function readTrajectoryHistory(limit = 100) {
-  const dir = resolvePath(METRICS_DIR);
-  if (!existsSync(dir)) return [];
-  const files = readdirSync(dir)
-    .filter(f => f.startsWith('session-') && f.endsWith('.json') && f !== 'session-latest.json')
-    .sort()
-    .reverse()
-    .slice(0, limit);
-  const out = [];
-  for (const f of files) {
-    const raw = readJson(`${METRICS_DIR}/${f}`);
-    if (!raw) continue;
-    const stats = parseSonaStats(raw.sonaStats);
-    out.push({
-      id: f.replace('.json', ''),
-      sessionId: raw.sessionId || f,
-      goal: raw.goal || '',
-      createdAt: raw.exportedAt,
-      stepCount: raw.trajectoryCount || 0,
-      reward: stats?.buffer_success_rate ?? null,
-      model: raw.model || 'v5',
-      learnStatus: raw.learnStatus,
-      stateBytes: raw.stateBytes,
-      patternsStored: stats?.patterns_stored ?? null,
-      patternsLearned: stats?.patterns_learned ?? null,
-      ewcTasks: stats?.ewc_tasks ?? null,
-    });
-  }
-  return out;
-}
-
 export function registerLegacyShims(app) {
-  // ── Trajectory history ─────────────────────────────────────────
-  app.get('/api/trajectories', (req, res) => {
-    try {
-      const limit = parseInt(req.query.limit, 10) || 100;
-      const trajectories = readTrajectoryHistory(limit);
-      res.json({ trajectories, count: trajectories.length });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-  app.get('/api/trajectories/:id/steps', (req, res) => {
-    // Per-step data is not persisted in v5 exports — return an empty array
-    // with the wrapping shape the v4 UI expects.
-    res.json({ steps: [], trajectoryId: req.params.id });
-  });
-  app.get('/api/rewards', (req, res) => {
-    try {
-      const latest = readJson(METRICS_LAST) || {};
-      const stats = parseSonaStats(latest.sonaStats);
-      const rewards = stats ? [{
-        timestamp: latest.exportedAt,
-        sessionId: latest.sessionId || null,
-        reward: stats.buffer_success_rate ?? null,
-        patternsLearned: stats.patterns_learned ?? null,
-        source: 'sonaStats',
-      }] : [];
-      res.json({ rewards, count: rewards.length, captured: rewards.length > 0 });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+  // Trajectory/steps/rewards/session endpoints now live in routes/trajectories.js
+  // and read from C4 SQLite + daemon logs (real data, not shimmed fabrications).
 
   // ── 6-node architecture-live (drives cycle widget) ─────────────
   app.get('/api/architecture-live', (req, res) => {
@@ -408,73 +346,6 @@ export function registerLegacyShims(app) {
         });
       }
       res.json({ insights, count: insights.length });
-    } catch (err) { res.status(500).json({ error: err.message }); }
-  });
-
-  app.get('/api/session', (req, res) => {
-    try {
-      const current = readJson(CUR_SESSION) || {};
-      const latest = readJson(METRICS_LAST) || {};
-      const sona = readJson(SONA_STATE) || {};
-      const rbankRaw = readJson(RBANK) || [];
-      const rbank = Array.isArray(rbankRaw) ? rbankRaw : [];
-      const stats = parseSonaStats(latest.sonaStats);
-      const { tiers, total: memEntries } = readMemoryTiers();
-
-      const sessions = [];
-      const dir = resolvePath(METRICS_DIR);
-      if (existsSync(dir)) {
-        for (const f of readdirSync(dir)
-          .filter(f => f.startsWith('session-') && f.endsWith('.json') && f !== 'session-latest.json')
-          .sort().reverse().slice(0, 20)) {
-          const r = readJson(`${METRICS_DIR}/${f}`);
-          if (!r) continue;
-          sessions.push({
-            id: f.replace('.json', ''),
-            sessionId: r.sessionId || f,
-            createdAt: r.exportedAt,
-            stepCount: r.trajectoryCount || 0,
-            learnStatus: r.learnStatus,
-          });
-        }
-      }
-
-      res.json({
-        current: {
-          ...current,
-          sonaPatterns: (sona.patterns || []).length,
-          rbankPatterns: rbank.length,
-          memEntries,
-        },
-        sessions,
-        episodes: rbank.map(p => ({
-          id: p.id,
-          uuid: p.uuid,
-          category: p.category,
-          confidence: p.confidence,
-          usageCount: p.usage_count,
-          successCount: p.success_count,
-          createdAt: p.created_at,
-        })),
-        policies: (sona.patterns || []).map(p => ({
-          id: p.id,
-          patternType: p.pattern_type,
-          modelRoute: p.model_route,
-          avgQuality: p.avg_quality,
-          clusterSize: p.cluster_size,
-          accessCount: p.access_count,
-        })),
-        learningSessions: sessions,
-        hierarchical: tiers,
-        memoryStats: {
-          total: memEntries,
-          patternsLearned: stats?.patterns_learned ?? 0,
-          patternsStored: stats?.patterns_stored ?? 0,
-          trajectoriesBuffered: stats?.trajectories_buffered ?? 0,
-          trajectoriesRecorded: stats?.trajectories_recorded ?? 0,
-          ewcTasks: sona.ewc_task_count || 0,
-        },
-      });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 

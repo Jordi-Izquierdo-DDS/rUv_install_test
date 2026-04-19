@@ -1,5 +1,7 @@
 # Next Session 02: Trajectory Panel — Read-Only from Existing Data
 
+**Status:** ✅ DONE (2026-04-19) — all 5 tasks implemented in `viz/src/routes/trajectories.js`; four shims removed from `viz/src/routes/legacy-shims.js`; smoke-tested against live viz on port 3199.
+
 **Project:** `/mnt/data/dev/RFV3_v5_test`
 **Depends on:** NEXT_SESSION.md (viz graph update) — can be done independently
 **Scope:** viz code ONLY — `.claude/helpers/` is OFF-LIMITS
